@@ -1,0 +1,2 @@
+#You can use regex within this file. List all the files that you want to ignore from the commit
+*.txt
