@@ -1,5 +1,23 @@
 from scipy.sparse import csr_matrix, eye
 import tensorflow as tf
+def nd_to_index(Graph):
+    nodes_idx = {node: i for i, node in enumerate(Graph.nodes)}
+    return nodes_idx
+
+def sites_to_sparse(base_config):
+    values=[]
+    configurations_in_sparse_notation=[]
+    for configuration in base_config:
+        value=0
+        for j in range(len(configuration)):
+            b= int(-1*(configuration[j]-1)*2**(j-1))
+            value+=b
+        values.append(value)
+        #print(value)
+        one_hot_vector = csr_matrix(([1], ([0], [value])), shape=(1, 2 ** len(configuration)), dtype=np.int8)
+        configurations_in_sparse_notation.append(one_hot_vector) 
+    return configurations_in_sparse_notation, values
+#The following implementation just relies on basic libraries
 def compute_wave_function_csr(graph_tuples_batch, ansatz, configurations):
     #TO BE FIXED the wave function currently sums up same configurations coefficients if they are presented multiple times. What should I do here? 
     
@@ -75,3 +93,34 @@ def loss_sparse_vectors(psi_sparse, phi_sparse):
     numerator = innerprod_sparse(psi_sparse, phi_sparse)
     loss= tf.constant(1.0, dtype=tf.float32)-numerator/norm_sqrt
     return loss
+def create_spin_operators(graph):
+
+    G=graph
+    # Define the spin operators on x y and z axis
+    Spin_x = jmat(1/2, 'x')
+    Spin_y = jmat(1/2, 'y')
+    Spin_z = jmat(1/2, 'z')
+    # Define ladder operators S+ and S- in terms of Sx and Sy
+    Spin_plus = Spin_x + 1j*Spin_y
+    Spin_minus = Spin_x - 1j*Spin_y
+
+    
+    #print(Sp_real, Sm_real, Sz_real, "What kind of objects are you", I)
+    # Define the identity operator
+    Identity = qeye(2)
+    
+    # Create a mapping from nodes to integer indices
+    # Initialize the Hamiltonian for the system
+
+    # Create a list of spin operators for each site
+    # Convert numpy arrays back to Qobj
+    Sp_real_qobj = Qobj(Spin_plus)
+    Sm_real_qobj = Qobj(Spin_minus)
+    Sz_real_qobj = Qobj(Spin_z)
+    #print(I, Sp_real_qobj)
+    # Create a list of spin operators for each site
+    spin_operators = [[csr_matrix(tensor([Sp_real_qobj if i == j else Identity for i in range(G.number_of_nodes())])) for j in range(G.number_of_nodes())],
+                      [csr_matrix(tensor([Sm_real_qobj if i == j else Identity for i in range(G.number_of_nodes())])) for j in range(G.number_of_nodes())],
+                      [csr_matrix(tensor([Sz_real_qobj if i == j else Identity for i in range(G.number_of_nodes())])) for j in range(G.number_of_nodes())]]
+    #print("Here we analyze the spin operator", "\n", spin_operators)
+    return spin_operators
