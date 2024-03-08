@@ -3,8 +3,8 @@ import sonnet as snt
 from graph_nets import modules
 from graph_nets import blocks
 
-hidden_layer_size=32 #This will be 128
-output_emb_size=16#This has to be 64 at the end
+hidden_layer_size=32    #This will be 128
+output_emb_size=16      #This has to be 64 at the end
 # Define the MLP model
 class MLPModel_glob(snt.Module):
     def __init__(self, name=None):
@@ -98,3 +98,16 @@ class ProcessorSharedWeights(ResidualGraphNetwork):
         for step in range(self.num_processing_steps):
             input_op = super(ProcessorSharedWeights, self).__call__(input_op)
         return input_op
+class GNN_double_output(snt.Module):
+    def __init__(self):
+        super(GNN_double_output, self).__init__()
+        self.encoder = Encoder()
+        self.processor = Processor(3) #Modification here change the number of layers of the processor, you can also choose another Processor from the range available
+        self.decoder = Decoder()
+        self.pooling_layer = PoolingLayer_double()
+
+    def __call__(self, inputs):
+        encoded = self.encoder(inputs)
+
+        output = self.pooling_layer(encoded)
+        return output
