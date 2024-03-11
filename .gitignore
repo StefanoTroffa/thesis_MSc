@@ -29,7 +29,7 @@ perf.data
 *.scorep_init.*
 #Ignore the data that we stored
 cache
-inputfile_*
+inputfile_thes
 *.pkl
 *.pkl.gz
 #

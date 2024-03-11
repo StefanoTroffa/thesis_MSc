@@ -8,7 +8,7 @@ def apply_raising_operator(config, site):
 
     """
     new_config = config.copy()
-    if config[site] == -1:
+    if new_config[site] == -1:
         new_config[site] = 1  # Spin flip from down to up
         return new_config
     else:
@@ -23,7 +23,7 @@ def apply_lowering_operator(config, site):
 
     """
     new_config = config.copy()
-    if config[site] == 1:
+    if new_config[site] == 1:
         new_config[site] = -1  # Spin flip from up to down
         return new_config
     else:
