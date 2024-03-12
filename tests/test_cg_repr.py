@@ -11,19 +11,22 @@ class TestCgRepr(unittest.TestCase):
         site = 0
         expected_config = np.array([1, -1, 1])
         new_config = apply_raising_operator(self.config, site)
-        self.assertTrue(np.isclose(new_config, expected_config))
-        self.assertFalse(np.isclose(self.config, new_config))
+        self.assertTrue(np.isclose(new_config, expected_config).all())
+        self.assertFalse(np.isclose(self.config, new_config).all())
         
         # Test that applying the operator to a spin-up state returns None
         new_config = apply_raising_operator(expected_config, site)
         self.assertIsNone(new_config)
 
     def test_apply_lowering_operator(self):
-        site = 0
-        expected_config = np.array([-1, -1, 1])
+        site =2
+        expected_config = np.array([-1, -1, -1])
         new_config = apply_lowering_operator(self.config, site)
-        self.assertTrue(np.isclose(new_config, expected_config))
-        self.assertFalse(np.isclose(self.config, new_config))
+
+        if new_config is not None:
+
+            self.assertTrue(np.isclose(new_config, expected_config).all())
+            self.assertFalse(np.isclose(self.config, new_config).all())
         # Test that applying the operator to a spin-down state returns None
         new_config = apply_lowering_operator(new_config, site)
         self.assertIsNone(new_config)

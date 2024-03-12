@@ -18,7 +18,7 @@ def apply_lowering_operator(config, site):
     """
     We are assuming in the following that the configuration is given as an np.array
     Further the following structure is given, the configuration is a basis state representation, corresponding
-    to site i we have the expectation value of S_z(i), with obvious notation (expectation valeu of the spin
+    to site i we have the expectation value of S_z(i), with obvious notation (expectation value of the spin
     along the z direction for site i)
 
     """
