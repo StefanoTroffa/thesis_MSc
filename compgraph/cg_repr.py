@@ -1,4 +1,6 @@
+from compgraph.useful import nd_to_index
 import numpy as np
+
 def apply_raising_operator(config, site):
     """
     We are assuming in the following that the configuration is given as an np.array
@@ -72,3 +74,49 @@ def apply_edge_contribution(config, i, j):
         new_configs.append(new_config_lowered)
 
     return new_configs    
+
+
+
+def Square_2DHam_exp(psi, graph, phi, J2, configs_psi, configs_phi):
+    expectation_value = 0
+    node_to_index=nd_to_index(graph)
+    ###NEED TO FIX THE POSSIBILITY OF NOT allowing DIFF DIMENSION BETWEEN GRAPH AND CONFIGURATIONS GIVEN
+    # Define the coupling constants, we only need J2 as J1 can be set WLOG to 1 
+    J2 = 2. # 
+    J1=1. #Is fixed, we can vary only j2 because it is equivalent up to a constant factor -> Does not influence the eigenvectors, only the eigenvalues 
+    for (k,config_phi) in enumerate(configs_phi):
+        for (l,config_psi) in enumerate(configs_psi):
+            # print(l,k, "Config", config_psi, config_phi)
+            # print(psi, phi, "those are the states ")
+            if are_configs_identical(config_phi,config_psi):
+                expectation_value += (J1+J2)*psi[l].conj()*phi[k]
+            elif configs_differ_by_two_sites(config_phi,config_psi):
+                for i, j in graph.edges:
+                    # Map nodes to indices
+                    i_index = node_to_index[i]
+                    j_index = node_to_index[j]
+                    # print(config_psi, i_index, j_index)
+                    off_diag=apply_edge_contribution(config_psi,i_index, j_index)
+                    if off_diag is not None:
+                        # print(off_diag, config_phi, "HERE WE ARE")
+                        for new_config in off_diag:
+                            # Check if the new configuration is identical to config_phi
+                            if are_configs_identical(new_config, config_phi):
+                                expectation_value += 0.5*J1*psi[l].conj()*phi[k]
+                            # to identify these pairs based on the geometry of your lattice.
+                for i in graph.nodes:
+                    i_index = node_to_index[i]
+
+                    for j in graph.neighbors(i):
+                        j_index = node_to_index[j]
+                        off_diag=apply_edge_contribution(config_psi,i_index, j_index)
+                        if off_diag is not None:
+                                    # print(off_diag, config_phi, "HERE WE ARE")
+                                    for new_config in off_diag:
+                                        # Check if the new configuration is identical to config_phi
+                                        if are_configs_identical(new_config, config_phi):
+                                            expectation_value += 0.5*J2*psi[l].conj()*phi[k]
+
+    print("end of square 2d function")
+    return expectation_value
+                        

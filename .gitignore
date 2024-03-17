@@ -35,3 +35,4 @@ inputfile_thes
 #
 # We do not store checkpoints of jupyter notebooks
 .ipynb_checkpoints
+Notebook_clear.ipynb

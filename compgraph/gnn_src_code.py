@@ -45,6 +45,7 @@ class Encoder(modules.GraphNetwork):
 
     def __call__(self, inputs):
         return super(Encoder, self).__call__(inputs)
+
 class MLPModel_proc(snt.Module):
     def __init__(self, name=None):
         super(MLPModel_proc, self).__init__(name=name)
@@ -58,7 +59,37 @@ class MLPModel_proc(snt.Module):
         x = tf.nn.relu(self.layer2(x))
         x = tf.nn.relu(self.layer3(x))
         out=tf.nn.relu(self.layer4(x))
-        return out
+        return out    
+class ProcessorLayer(tf.keras.Model):
+    def __init__(self):
+        super(ProcessorLayer, self).__init__()
+        self.gn = modules.GraphNetwork(
+            edge_model_fn=lambda: MLPModel_proc(),
+            node_model_fn=lambda: MLPModel_proc(),
+            global_model_fn=lambda: MLPModel_glob()
+        )
+
+    def call(self, inputs):
+        # The Graph Network updates the graph
+        updated_graph = self.gn(inputs)
+        # The updated graph is added to the input graph (residual connection)
+        return inputs.replace(
+            nodes=inputs.nodes + updated_graph.nodes,
+            edges=inputs.edges + updated_graph.edges,
+            globals=inputs.globals + updated_graph.globals)
+
+class Processor(tf.keras.Model):
+    def __init__(self, num_layers):
+        super(Processor, self).__init__()
+        self.nlayers = [ProcessorLayer() for _ in range(num_layers)]
+
+    def call(self, inputs):
+        x = inputs
+        for layer in self.nlayers:
+            x = layer(x)
+        return x
+            
+
 ##The following class is useful to implement the residual connection as intended in the paper 
 class ResidualGraphNetwork(modules.GraphNetwork):
     def __init__(self, edge_model_fn, node_model_fn, global_model_fn):
@@ -98,6 +129,53 @@ class ProcessorSharedWeights(ResidualGraphNetwork):
         for step in range(self.num_processing_steps):
             input_op = super(ProcessorSharedWeights, self).__call__(input_op)
         return input_op
+    
+
+class MLPModel_dec(snt.Module):
+    def __init__(self, name=None):
+        super(MLPModel_dec, self).__init__(name=name)
+        self.layer1 = snt.Linear(output_size=hidden_layer_size, name='layer1')
+        self.layer2 = snt.Linear(output_size=hidden_layer_size, name='layer2')
+        self.layer3 = snt.Linear(output_size=hidden_layer_size, name='layer3')
+        self.layer4 = snt.Linear(output_size=output_emb_size, name='layer4')
+
+    def __call__(self, inputs):
+        x = tf.nn.relu(self.layer1(inputs))
+        x = tf.nn.relu(self.layer2(x))
+        x = tf.nn.relu(self.layer3(x))
+        out=tf.nn.relu(self.layer4(x))
+        return out
+
+class Decoder(modules.GraphNetwork):
+    def __init__(self):
+        super(Decoder, self).__init__(
+            edge_model_fn=MLPModel_dec,
+            node_model_fn=MLPModel_dec,
+            global_model_fn=MLPModel_glob
+        )
+
+    def __call__(self, inputs):
+        return super(Decoder, self).__call__(inputs)    
+class PoolingLayer_double(tf.Module):
+    def __init__(self):
+        super(PoolingLayer_double, self).__init__()
+        self.linear = snt.Linear(output_size=2, name='linear_pool')
+        self.global_transform = snt.Linear(output_size=2, name='global_transform')
+
+    def __call__(self, inputs):
+        # Sum-pooling over nodes and edges
+        pooled_nodes = tf.reduce_sum(inputs.nodes, axis=0)
+        pooled_edges = tf.reduce_sum(inputs.edges, axis=0)
+        pooled_features = tf.concat([pooled_nodes, pooled_edges], axis=0)
+        
+        transformed = self.linear(tf.expand_dims(pooled_features, axis=0))
+        
+        # Transform globals to match the shape of transformed
+        transformed_globals = self.global_transform(0.05 *inputs.globals)
+        #### THIS IS THE MOST RELEVANT PART, why again I can not use elu here? Is something related to the metric as well
+        out = tf.nn.elu(transformed + transformed_globals)
+        
+        return out    
 class GNN_double_output(snt.Module):
     def __init__(self):
         super(GNN_double_output, self).__init__()

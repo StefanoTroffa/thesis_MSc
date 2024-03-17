@@ -1,8 +1,16 @@
+from compgraph.useful import nd_to_index
+import scipy.sparse
+
 from scipy.sparse import csr_matrix, eye
 import tensorflow as tf
-def nd_to_index(Graph):
-    nodes_idx = {node: i for i, node in enumerate(Graph.nodes)}
-    return nodes_idx
+import numpy as np
+import qutip
+from qutip import tensor, jmat, qeye, Qobj
+
+
+
+
+
 
 def sites_to_sparse(base_config):
     values=[]
@@ -49,9 +57,11 @@ def compute_wave_function_csr(graph_tuples_batch, ansatz, configurations):
     wave_function_csr = csr_matrix((data, (row_indices, col_indices)), shape=(size, 1))
     
     return wave_function_csr
+
 def innerprod_sparse(psi_sparse, phi_sparse):
     inn_prod=psi_sparse.conj().transpose().dot(phi_sparse)   
     return inn_prod
+
 def construct_sparse_hamiltonian(Graph, spin_operators, J2):
     Hamiltonian = csr_matrix((2**Graph.number_of_nodes(), 2**Graph.number_of_nodes()))
     # Define the coupling constants
@@ -84,7 +94,8 @@ def construct_sparse_hamiltonian(Graph, spin_operators, J2):
                                      +spin_operators[2][i_index]*spin_operators[2][k_index])
 
                     Hamiltonian += J2 * term
-    return Hamiltonian                
+    return Hamiltonian    
+            
 def loss_sparse_vectors(psi_sparse, phi_sparse):
     psi_norm= innerprod_sparse(psi_sparse,psi_sparse)
     phi_norm= innerprod_sparse(phi_sparse,phi_sparse)
@@ -93,6 +104,7 @@ def loss_sparse_vectors(psi_sparse, phi_sparse):
     numerator = innerprod_sparse(psi_sparse, phi_sparse)
     loss= tf.constant(1.0, dtype=tf.float32)-numerator/norm_sqrt
     return loss
+
 def create_spin_operators(graph):
 
     G=graph

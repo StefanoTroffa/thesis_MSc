@@ -1,18 +1,68 @@
 import tensorflow as tf
-def compute_wave_function_sparse_tensor(graph_tuples_batch, ansatz, configurations):
+from tensorflow.python.ops.linalg.sparse import sparse_csr_matrix_ops
+
+
+def tf_multiply(a: tf.SparseTensor, b: tf.SparseTensor):
+    a_sm = sparse_csr_matrix_ops.sparse_tensor_to_csr_sparse_matrix(a.indices, a.values, a.dense_shape)
+
+    b_sm = sparse_csr_matrix_ops.sparse_tensor_to_csr_sparse_matrix(b.indices, b.values, b.dense_shape)
+
+    c_sm = sparse_csr_matrix_ops.sparse_matrix_sparse_mat_mul(a=a_sm, b=b_sm, type=tf.complex64)
+
+    c = sparse_csr_matrix_ops.csr_sparse_matrix_to_sparse_tensor(c_sm, tf.complex64)
+
+    return tf.SparseTensor(c.indices, c.values, dense_shape=c.dense_shape)
+
+def compute_loss_tensor(psi_sparse, phi_sparse):
+    # Compute the conjugate of the sparse tensor values
+    psi_sparse_conj = tf.SparseTensor(
+        indices=psi_sparse.indices,
+        values=tf.math.conj(psi_sparse.values),
+        dense_shape=psi_sparse.dense_shape
+    )
     
+    phi_sparse_conj = tf.SparseTensor(
+        indices=phi_sparse.indices,
+        values=tf.math.conj(phi_sparse.values),
+        dense_shape=phi_sparse.dense_shape
+    )
+    
+    # Reorder the indices of the conjugate sparse tensor
+    psi_sparse_conj = tf.sparse.reorder(psi_sparse_conj)
+    
+    # Convert psi_sparse_conj to dense
+    psi_dense_conj = tf.sparse.to_dense(psi_sparse_conj)
+    phi_dense_conj= tf.sparse.to_dense(phi_sparse_conj)
+    
+    # Compute the norms using sparse-dense matrix multiplication
+    
+    psi_norm = tf.sparse.sparse_dense_matmul(psi_sparse, psi_dense_conj, adjoint_b=False)
+    phi_norm = tf.sparse.sparse_dense_matmul(phi_sparse, phi_dense_conj, adjoint_b=False)
+    print("norms:", psi_norm, phi_norm)
+    norm = psi_norm * phi_norm
+    
+    # Compute the numerator using dense-sparse matrix multiplication
+    numerator = tf.sparse.sparse_dense_matmul(psi_sparse, phi_dense_conj, adjoint_b=True)
+    print(psi_sparse, phi_sparse)
+    print("numerator", numerator, "Norm" ,"\n", norm)
+    loss = numerator/tf.math.sqrt(norm)
+    
+    return loss
+def compute_wave_function_sparse_tensor(graph_tuples_batch, ansatz, configurations):
+    size=2**len(graph_tuples_batch[0].nodes)
+
+    #we assume COMPLETET HERE THE THING. 
     values = []  # List to store the non-zero entries
     indices = []  # List to store the indices of non-zero entries
-    
+    print(type(graph_tuples_batch[0]))
     # Compute the wave function components for each graph tuple
     for idx, graph_tuple in enumerate(graph_tuples_batch):
         amplitude, phase = ansatz(graph_tuple)[0]
-        
-        # Convert amplitude to complex tensor with zero imaginary part
-        amplitude_complex = tf.complex(real=amplitude, imag=tf.zeros_like(amplitude))
-        
+        amplitude = tf.cast(amplitude, tf.float32)
+        phase = tf.cast(phase, tf.float32)        
+ 
         # Compute the complex coefficient using TensorFlow operations
-        complex_coefficient = amplitude_complex * tf.math.exp(tf.complex(real=0.0, imag=phase))
+        complex_coefficient = tf.complex(amplitude, phase)
         
         # Extract the row index from the configuration
         row_index = configurations[idx].indices[0]
@@ -26,9 +76,10 @@ def compute_wave_function_sparse_tensor(graph_tuples_batch, ansatz, configuratio
     indices_tensor = tf.constant(indices, dtype=tf.int64)
     
     # Create a sparse tensor
-    sparse_tensor = tf.sparse.SparseTensor(indices=indices_tensor, values=values_tensor, dense_shape=[512, 1])
+    sparse_tensor = tf.sparse.SparseTensor(indices=indices_tensor, values=values_tensor, dense_shape=[size, 1])
     
     return sparse_tensor
+
 def compute_wave_function_sparse_tensor_u2(graph_tuples_batch, ansatz, configurations):
     #### Through numerical simulation the runtime of the function that only gives unique values is approx equal to not check at all
     unique_data = {}  # Dictionary to store unique indices and their corresponding values
