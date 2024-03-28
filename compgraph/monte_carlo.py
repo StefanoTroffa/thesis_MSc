@@ -44,8 +44,6 @@ def sequential_monte_carlo_update(graph_tuples, gnn, N_sweeps):
     updated_graph_tuples_and_configs = [monte_carlo_update(graph_tuple, gnn, N_sweeps) for graph_tuple in graph_tuples]
     updated_graph_tuples, updated_configurations = zip(*updated_graph_tuples_and_configs)
     return list(updated_graph_tuples), list(updated_configurations)
-print(graph_tuples[0].nodes)
-updated_graph_tuples, new_config = sequential_monte_carlo_update(graph_tuples[:1], gnn, 9)
 def process_batch(batch):
     graph_tuple, gnn, N_sweeps = batch
     return monte_carlo_update(graph_tuple, gnn, N_sweeps)

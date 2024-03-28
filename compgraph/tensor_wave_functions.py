@@ -1,6 +1,11 @@
 import tensorflow as tf
 from tensorflow.python.ops.linalg.sparse import sparse_csr_matrix_ops
-
+from scipy.sparse import coo_matrix
+import numpy as np
+def convert_csr_to_sparse_tensor(csr_matrix):
+    coo = coo_matrix(csr_matrix)
+    indices = np.mat([coo.row, coo.col]).transpose()
+    return tf.SparseTensor(indices, coo.data.astype(tf.complex64), coo.shape)
 
 def tf_multiply(a: tf.SparseTensor, b: tf.SparseTensor):
     a_sm = sparse_csr_matrix_ops.sparse_tensor_to_csr_sparse_matrix(a.indices, a.values, a.dense_shape)
@@ -45,7 +50,7 @@ def compute_loss_tensor(psi_sparse, phi_sparse):
     numerator = tf.sparse.sparse_dense_matmul(psi_sparse, phi_dense_conj, adjoint_b=True)
     print(psi_sparse, phi_sparse)
     print("numerator", numerator, "Norm" ,"\n", norm)
-    loss = numerator/tf.math.sqrt(norm)
+    loss = 1-numerator/tf.math.sqrt(norm)
     
     return loss
 def compute_wave_function_sparse_tensor(graph_tuples_batch, ansatz, configurations):
@@ -54,7 +59,6 @@ def compute_wave_function_sparse_tensor(graph_tuples_batch, ansatz, configuratio
     #we assume COMPLETET HERE THE THING. 
     values = []  # List to store the non-zero entries
     indices = []  # List to store the indices of non-zero entries
-    print(type(graph_tuples_batch[0]))
     # Compute the wave function components for each graph tuple
     for idx, graph_tuple in enumerate(graph_tuples_batch):
         amplitude, phase = ansatz(graph_tuple)[0]

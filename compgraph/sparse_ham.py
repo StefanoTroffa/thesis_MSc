@@ -7,11 +7,6 @@ import numpy as np
 import qutip
 from qutip import tensor, jmat, qeye, Qobj
 
-
-
-
-
-
 def sites_to_sparse(base_config):
     values=[]
     configurations_in_sparse_notation=[]
@@ -70,7 +65,7 @@ def construct_sparse_hamiltonian(Graph, spin_operators, J2):
 
     # Iterate over the edges of the graph
     for i, j in Graph.edges:
-        print(i,j)
+        #print(i,j)
         # Map nodes to indices
         i_index = node_to_index[i]
         j_index = node_to_index[j]
@@ -99,9 +94,12 @@ def construct_sparse_hamiltonian(Graph, spin_operators, J2):
 def loss_sparse_vectors(psi_sparse, phi_sparse):
     psi_norm= innerprod_sparse(psi_sparse,psi_sparse)
     phi_norm= innerprod_sparse(phi_sparse,phi_sparse)
-    norm_sqrt = tf.math.sqrt(psi_norm[0,0] * phi_norm[0,0])
-    
+    norm_sqrt = tf.math.sqrt(psi_norm[0,0] * phi_norm[0,0]);
     numerator = innerprod_sparse(psi_sparse, phi_sparse)
+    print(numerator, type(numerator))
+    numerator_dense = tf.sparse.to_dense(numerator)
+    print(numerator_dense)
+    print(norm_sqrt)
     loss= tf.constant(1.0, dtype=tf.float32)-numerator/norm_sqrt
     return loss
 

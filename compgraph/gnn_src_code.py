@@ -2,6 +2,7 @@ import tensorflow as tf
 import sonnet as snt
 from graph_nets import modules
 from graph_nets import blocks
+#TODO THIS IS VERY BAD PRACTICE: THE HIDDEN_LAYER_SIZE AND OUTPUT_EMB_SIZE SHOULD BE TUNABLE BY THE USERS; WITH A DEFAULT OPTION. What is the syntax for that again? Patrick? 
 
 hidden_layer_size=32    #This will be 128
 output_emb_size=16      #This has to be 64 at the end
