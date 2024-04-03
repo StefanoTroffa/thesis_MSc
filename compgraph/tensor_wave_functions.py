@@ -5,19 +5,25 @@ import numpy as np
 def convert_csr_to_sparse_tensor(csr_matrix):
     coo = coo_matrix(csr_matrix)
     indices = np.mat([coo.row, coo.col]).transpose()
-    return tf.SparseTensor(indices, coo.data.astype(tf.complex64), coo.shape)
+    return tf.SparseTensor(indices, coo.data.astype(np.complex128), coo.shape)
 
-def tf_multiply(a: tf.SparseTensor, b: tf.SparseTensor):
-    a_sm = sparse_csr_matrix_ops.sparse_tensor_to_csr_sparse_matrix(a.indices, a.values, a.dense_shape)
+def adjust_dtype_and_multiply(a: tf.SparseTensor, b: tf.SparseTensor):
+    # Convert both SparseTensors to CSR sparse matrix with the desired type
+    a_sm = sparse_csr_matrix_ops.sparse_tensor_to_csr_sparse_matrix(
+        a.indices, tf.cast(a.values, tf.complex128), a.dense_shape)
+    
+    b_sm = sparse_csr_matrix_ops.sparse_tensor_to_csr_sparse_matrix(
+        b.indices, tf.cast(b.values, tf.complex128), b.dense_shape)
 
-    b_sm = sparse_csr_matrix_ops.sparse_tensor_to_csr_sparse_matrix(b.indices, b.values, b.dense_shape)
+    # Perform sparse matrix multiplication
+    c_sm = sparse_csr_matrix_ops.sparse_matrix_sparse_mat_mul(
+        a_sm, b_sm, type=tf.complex128)
 
-    c_sm = sparse_csr_matrix_ops.sparse_matrix_sparse_mat_mul(a=a_sm, b=b_sm, type=tf.complex64)
+    # Convert the result back to a SparseTensor
+    c = sparse_csr_matrix_ops.csr_sparse_matrix_to_sparse_tensor(
+        c_sm, tf.complex128)
 
-    c = sparse_csr_matrix_ops.csr_sparse_matrix_to_sparse_tensor(c_sm, tf.complex64)
-
-    return tf.SparseTensor(c.indices, c.values, dense_shape=c.dense_shape)
-
+    return tf.SparseTensor(indices=c.indices, values=c.values, dense_shape=c.dense_shape)
 def compute_loss_tensor(psi_sparse, phi_sparse):
     # Compute the conjugate of the sparse tensor values
     psi_sparse_conj = tf.SparseTensor(
