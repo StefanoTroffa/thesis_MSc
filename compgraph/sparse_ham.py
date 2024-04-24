@@ -1,4 +1,4 @@
-from compgraph.useful import nd_to_index
+from compgraph.useful import node_to_index
 import scipy.sparse
 
 from scipy.sparse import csr_matrix, eye
@@ -13,11 +13,12 @@ def sites_to_sparse(base_config):
     for configuration in base_config:
         value=0
         for j in range(len(configuration)):
-            b= int(-1*(configuration[j]-1)*2**(j-1))
+            b= int(-1*(configuration[j]-1)*2**(len(configuration)-j-2))
             value+=b
-        values.append(value)
+
+        values.append(2**len(configuration)-value)
         #print(value)
-        one_hot_vector = csr_matrix(([1], ([0], [value])), shape=(1, 2 ** len(configuration)), dtype=np.int8)
+        one_hot_vector = csr_matrix(([1], ([0], [2**len(configuration)-value-1])), shape=(1, 2 ** len(configuration)), dtype=np.int8)
         configurations_in_sparse_notation.append(one_hot_vector) 
     return configurations_in_sparse_notation, values
 #The following implementation just relies on basic libraries
@@ -57,18 +58,19 @@ def innerprod_sparse(psi_sparse, phi_sparse):
     inn_prod=psi_sparse.conj().transpose().dot(phi_sparse)   
     return inn_prod
 
-def construct_sparse_hamiltonian(Graph, spin_operators, J2):
-    Hamiltonian = csr_matrix((2**Graph.number_of_nodes(), 2**Graph.number_of_nodes()))
+def construct_sparse_hamiltonian(graph, J2):
+    
+    spin_operators= create_spin_operators_qutipv5(graph)
+    Hamiltonian = csr_matrix((2**graph.number_of_nodes(), 2**graph.number_of_nodes()))
     # Define the coupling constants
     J1 = 1. 
-    node_to_index=nd_to_index(Graph)
+    nd_index=node_to_index(graph)
 
     # Iterate over the edges of the graph
-    for i, j in Graph.edges:
-        #print(i,j)
+    for i, j in graph.edges:
         # Map nodes to indices
-        i_index = node_to_index[i]
-        j_index = node_to_index[j]
+        i_index = nd_index[i]
+        j_index = nd_index[j]
 
         # Add the interaction term to the Hamiltonian
         term_to_be_add = (0.5*spin_operators[0][i_index]*(spin_operators[1][j_index]) + 
@@ -77,13 +79,13 @@ def construct_sparse_hamiltonian(Graph, spin_operators, J2):
         Hamiltonian += J1 * csr_matrix(term_to_be_add)
 
     # Add next nearest neighbour interactions
-    for i in Graph.nodes:
-        i_index = node_to_index[i]
-        for j in Graph.neighbors(i):
-            j_index = node_to_index[j]
-            for k in Graph.neighbors(j):
+    for i in graph.nodes:
+        i_index = nd_index[i]
+        for j in graph.neighbors(i):
+            j_index = nd_index[j]
+            for k in graph.neighbors(j):
                 if k != i:
-                    k_index = node_to_index[k]
+                    k_index = nd_index[k]
                     term= csr_matrix(0.5*spin_operators[0][i_index]*spin_operators[1][k_index] 
                                      + 0.5*spin_operators[1][i_index]*spin_operators[0][k_index] 
                                      +spin_operators[2][i_index]*spin_operators[2][k_index])
@@ -105,32 +107,62 @@ def loss_sparse_vectors(psi_sparse, phi_sparse):
 
 def create_spin_operators(graph):
 
-    G=graph
-    # Define the spin operators on x y and z axis
-    Spin_x = jmat(1/2, 'x')
-    Spin_y = jmat(1/2, 'y')
-    Spin_z = jmat(1/2, 'z')
-    # Define ladder operators S+ and S- in terms of Sx and Sy
-    Spin_plus = Spin_x + 1j*Spin_y
-    Spin_minus = Spin_x - 1j*Spin_y
+        G=graph
+        # Define the spin operators on x y and z axis
+        Spin_x = jmat(1/2, 'x')
+        Spin_y = jmat(1/2, 'y')
+        Spin_z = jmat(1/2, 'z')
+        # Define ladder operators S+ and S- in terms of Sx and Sy
+        Spin_plus = Spin_x + 1j*Spin_y
+        Spin_minus = Spin_x - 1j*Spin_y
 
-    
-    #print(Sp_real, Sm_real, Sz_real, "What kind of objects are you", I)
-    # Define the identity operator
-    Identity = qeye(2)
-    
-    # Create a mapping from nodes to integer indices
-    # Initialize the Hamiltonian for the system
+        # Define the identity operator
+        Identity = qeye(2)
+        
+        # Create a mapping from nodes to integer indices
+        # Initialize the Hamiltonian for the system
 
-    # Create a list of spin operators for each site
-    # Convert numpy arrays back to Qobj
-    Sp_real_qobj = Qobj(Spin_plus)
-    Sm_real_qobj = Qobj(Spin_minus)
-    Sz_real_qobj = Qobj(Spin_z)
-    #print(I, Sp_real_qobj)
-    # Create a list of spin operators for each site
-    spin_operators = [[csr_matrix(tensor([Sp_real_qobj if i == j else Identity for i in range(G.number_of_nodes())])) for j in range(G.number_of_nodes())],
-                      [csr_matrix(tensor([Sm_real_qobj if i == j else Identity for i in range(G.number_of_nodes())])) for j in range(G.number_of_nodes())],
-                      [csr_matrix(tensor([Sz_real_qobj if i == j else Identity for i in range(G.number_of_nodes())])) for j in range(G.number_of_nodes())]]
-    #print("Here we analyze the spin operator", "\n", spin_operators)
-    return spin_operators
+        # Create a list of spin operators for each site
+        # Convert numpy arrays back to Qobj
+        Sp_real_qobj = Qobj(Spin_plus)
+        Sm_real_qobj = Qobj(Spin_minus)
+        Sz_real_qobj = Qobj(Spin_z)
+        #print(I, Sp_real_qobj)
+        # Create a list of spin operators for each site
+        spin_operators = [[csr_matrix(tensor([Sp_real_qobj if i == j else Identity for i in range(G.number_of_nodes())])) for j in range(G.number_of_nodes())],
+                        [csr_matrix(tensor([Sm_real_qobj if i == j else Identity for i in range(G.number_of_nodes())])) for j in range(G.number_of_nodes())],
+                        [csr_matrix(tensor([Sz_real_qobj if i == j else Identity for i in range(G.number_of_nodes())])) for j in range(G.number_of_nodes())]]
+        #print("Here we analyze the spin operator", "\n", spin_operators)
+        return spin_operators
+
+def create_spin_operators_qutipv5(graph):
+
+        G=graph
+        # Define the spin operators on x y and z axis
+        Spin_x = jmat(1/2, 'x')
+        Spin_y = jmat(1/2, 'y')
+        Spin_z = jmat(1/2, 'z')
+        # Define ladder operators S+ and S- in terms of Sx and Sy
+        Spin_plus = Spin_x + 1j*Spin_y
+        Spin_minus = Spin_x - 1j*Spin_y
+
+        # Define the identity operator
+        Identity = qeye(2)
+        
+        # Create a mapping from nodes to integer indices
+        # Initialize the Hamiltonian for the system
+
+        # Create a list of spin operators for each site
+        # Convert numpy arrays back to Qobj
+        Sp_real_qobj = Qobj(Spin_plus)
+        Sm_real_qobj = Qobj(Spin_minus)
+        Sz_real_qobj = Qobj(Spin_z)
+        #print(I, Sp_real_qobj)
+        #print(Sp_real_qobj.to("CSR").data_as("csr_matrix"))
+        # Create a list of spin operators for each site
+        #print(tensor([Sp_real_qobj if i == 1 else Identity for i in range(G.number_of_nodes())]).to("CSR").data_as("csr_matrix")) 
+        spin_operators = [[csr_matrix(tensor([Sp_real_qobj if i == j else Identity for i in range(G.number_of_nodes())]).to("CSR").data_as("csr_matrix")) for j in range(G.number_of_nodes())],
+                        [csr_matrix(tensor([Sm_real_qobj if i == j else Identity for i in range(G.number_of_nodes())]).to("CSR").data_as("csr_matrix")) for j in range(G.number_of_nodes())],
+                        [csr_matrix(tensor([Sz_real_qobj if i == j else Identity for i in range(G.number_of_nodes())]).to("CSR").data_as("csr_matrix")) for j in range(G.number_of_nodes())]]
+        #print("Here we analyze the spin operator", "\n", spin_operators)
+        return spin_operators

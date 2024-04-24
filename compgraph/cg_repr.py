@@ -1,5 +1,7 @@
-from compgraph.useful import nd_to_index
+from compgraph.useful import node_to_index, create_graph_tuples
 import numpy as np
+import networkx as nx
+
 
 def apply_raising_operator(config, site):
     """
@@ -52,34 +54,35 @@ def configs_differ_by_two_sites(config1, config2):
     # Use numpy to count the differences in a vectorized manner
     return np.sum(config1 != config2) == 2
 def apply_edge_contribution(config, i, j):
-    # Apply the spin raising operator on site i and lowering on site j
-    new_config_raised = apply_raising_operator(config, i)
-    if new_config_raised is not None:
-        new_config_lowered = apply_lowering_operator(new_config_raised, j)
-    else:
-        new_config_lowered = None
-
-    # Apply the spin lowering operator on site i and raising on site j
-    new_config_lowered_initial = apply_lowering_operator(config, i)
-    if new_config_lowered_initial is not None:
-        new_config_raised = apply_raising_operator(new_config_lowered_initial, j)
-    else:
-        new_config_raised = None
-
-    # Combine the new configurations if they are not None
     new_configs = []
-    if new_config_raised is not None:
-        new_configs.append(new_config_raised)
-    if new_config_lowered is not None:
-        new_configs.append(new_config_lowered)
+    if config[i]!=config[j]:
+        # Apply the spin raising operator on site i and lowering on site j
+        new_config_raised = apply_raising_operator(config, i)
+        if new_config_raised is not None:
+            new_config_lowered = apply_lowering_operator(new_config_raised, j)
+        else:
+            new_config_lowered = None
+
+        # Apply the spin lowering operator on site i and raising on site j
+        new_config_lowered_initial = apply_lowering_operator(config, i)
+        if new_config_lowered_initial is not None:
+            new_config_raised = apply_raising_operator(new_config_lowered_initial, j)
+        else:
+            new_config_raised = None
+
+        # Combine the new configurations if they are not None
+        if new_config_raised is not None:
+            new_configs.append(new_config_raised)
+        if new_config_lowered is not None:
+            new_configs.append(new_config_lowered)
 
     return new_configs    
 
 
 
-def Square_2DHam_exp(psi, graph, phi, J2, configs_psi, configs_phi):
+def square_2dham_exp(psi, graph, phi, J2, configs_psi, configs_phi):
     expectation_value = 0
-    node_to_index=nd_to_index(graph)
+    nd_to_index=node_to_index(graph)
     ###NEED TO FIX THE POSSIBILITY OF NOT allowing DIFF DIMENSION BETWEEN GRAPH AND CONFIGURATIONS GIVEN
     # Define the coupling constants, we only need J2 as J1 can be set WLOG to 1 
     J2 = 2. # 
@@ -93,8 +96,8 @@ def Square_2DHam_exp(psi, graph, phi, J2, configs_psi, configs_phi):
             elif configs_differ_by_two_sites(config_phi,config_psi):
                 for i, j in graph.edges:
                     # Map nodes to indices
-                    i_index = node_to_index[i]
-                    j_index = node_to_index[j]
+                    i_index = nd_to_index[i]
+                    j_index = nd_to_index[j]
                     # print(config_psi, i_index, j_index)
                     off_diag=apply_edge_contribution(config_psi,i_index, j_index)
                     if off_diag is not None:
@@ -105,10 +108,10 @@ def Square_2DHam_exp(psi, graph, phi, J2, configs_psi, configs_phi):
                                 expectation_value += 0.5*J1*psi[l].conj()*phi[k]
                             # to identify these pairs based on the geometry of your lattice.
                 for i in graph.nodes:
-                    i_index = node_to_index[i]
+                    i_index = nd_to_index[i]
 
                     for j in graph.neighbors(i):
-                        j_index = node_to_index[j]
+                        j_index = nd_to_index[j]
                         off_diag=apply_edge_contribution(config_psi,i_index, j_index)
                         if off_diag is not None:
                                     # print(off_diag, config_phi, "HERE WE ARE")
@@ -119,4 +122,59 @@ def Square_2DHam_exp(psi, graph, phi, J2, configs_psi, configs_phi):
 
     print("end of square 2d function")
     return expectation_value
-                        
+
+def config_hamiltonian_product(graph_tuple, graph, sublattice_encoding):
+    """
+    This function is an helper function to eventually compute the amplitudes of the time 
+    evoluted wave function.
+    config-> The configuration we want to project on given as a np.array or list of +-1s,
+    representing either spin up or down
+    graph-> is a networkx graph with edges and nodes, we are only interested in the edges
+    """
+    graph = nx.relabel_nodes(graph, node_to_index(graph))
+    #First function, the other one is built on this subroutine, that works also for just configurations
+    config= graph_tuple.nodes[:, 0].numpy()
+    configs=[]
+    amplitudes=[]
+    diagonal_contribution=0.
+    multiplier=1.
+    if len(config)==4:
+        multiplier=2.
+    #print('initial config', config)
+    for i, j in graph.edges:
+        if config[i]==config[j]:
+            diagonal_contribution+=1/4
+        else:
+            diagonal_contribution-=1/4
+
+        configs_temp=apply_edge_contribution(config, i,j)
+        #print('What happens here', configs_temp)
+        if len(configs_temp)>0:
+            configs.append(configs_temp[0])
+            amplitudes.append(multiplier*0.5)
+    if diagonal_contribution!=0:
+        configs.append(config)
+        amplitudes.append(multiplier*diagonal_contribution) 
+    
+
+    configs=np.array(configs)
+    #print('final configs from function nonzero amp', configs)        
+
+    graph_tuples_generated=create_graph_tuples(configs, graph,sublattice_encoding) 
+    
+    return graph_tuples_generated, amplitudes
+
+def configs_nonzeroamplitude_nnn(graph_tuple, graph, sublattice_encoding):
+
+    config= graph_tuple.nodes[:, 0].numpy()
+    configs=[]
+    for i in graph.nodes:
+        for j in graph.neighbors(i):
+            configs_temp=apply_edge_contribution(config, i,j)
+        
+            if len(configs_temp)>0:
+                configs.append(configs_temp[0])
+    configs=np.array(configs)
+    graph_tuples_generated=create_graph_tuples(configs, graph,sublattice_encoding) 
+        
+    return graph_tuples_generated

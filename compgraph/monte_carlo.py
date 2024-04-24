@@ -1,7 +1,8 @@
 import multiprocessing as mp
 from joblib import Parallel, delayed
 from multiprocessing import Pool
-
+import tensorflow as tf
+import numpy as np
 def monte_carlo_update(graph_tuple, gnn, N_sweeps):
     """Perform N_sweeps Monte Carlo updates on a single graph tuple and its corresponding configuration."""
     for _ in range(N_sweeps):
@@ -16,7 +17,7 @@ def monte_carlo_update(graph_tuple, gnn, N_sweeps):
         # Calculate the acceptance probability
         psi_old = gnn(graph_tuple)[0][0]
         psi_new = gnn(proposed_graph_tuple)[0][0]
-        p_accept = min(1, np.abs(psi_new / psi_old)**2)
+        p_accept = min(1, tf.abs(psi_new / psi_old)**2)
 
         # Accept or reject the new graph tuple
         if np.random.rand() < p_accept:
@@ -47,6 +48,7 @@ def sequential_monte_carlo_update(graph_tuples, gnn, N_sweeps):
 def process_batch(batch):
     graph_tuple, gnn, N_sweeps = batch
     return monte_carlo_update(graph_tuple, gnn, N_sweeps)
+
 """
 def process_batch(batch):
     graph_tuple, gnn, N_sweeps = batch

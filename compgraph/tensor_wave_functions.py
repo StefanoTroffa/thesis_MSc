@@ -2,6 +2,10 @@ import tensorflow as tf
 from tensorflow.python.ops.linalg.sparse import sparse_csr_matrix_ops
 from scipy.sparse import coo_matrix
 import numpy as np
+from compgraph.cg_repr import config_hamiltonian_product, square_2dham_exp
+from compgraph.useful import graph_tuple_toconfig, sparse_list_to_configs
+from compgraph.sparse_ham import sites_to_sparse
+
 def convert_csr_to_sparse_tensor(csr_matrix):
     coo = coo_matrix(csr_matrix)
     indices = np.mat([coo.row, coo.col]).transpose()
@@ -124,3 +128,159 @@ def compute_wave_function_sparse_tensor_u2(graph_tuples_batch, ansatz, configura
     sparse_tensor = tf.sparse.SparseTensor(indices=indices_tensor, values=values_tensor, dense_shape=[size, 1])
     
     return sparse_tensor
+
+
+
+def variational_wave_function_on_batch(model, graph_batch, graph_batch_indices):
+    unique_data = {}  # Dictionary to store unique indices and their corresponding values
+    size=2**len(graph_batch[0].nodes)
+    # Compute the wave function components for each graph tuple
+    for idx, graph_tuple in enumerate(graph_batch):
+        #print(graph_batch_indices, type(graph_batch_indices))
+        # Extract the row index from the configuration
+        row_index = graph_batch_indices[idx].indices[0]
+        # Check if the index is already in the dictionary
+        if row_index in unique_data:
+            pass  # Sum up the values for repeated indices
+        else:
+            amplitude, phase = model(graph_tuple)[0]
+            # Convert amplitude to complex tensor with zero imaginary part
+            complex_coefficient=tf.complex(real=amplitude, imag=phase)
+
+        
+            unique_data[row_index] = complex_coefficient  # Add new index and value to the dictionary
+    
+    # Convert dictionary to lists
+    values = list(unique_data.values())
+    indices = [[key, 0] for key in unique_data.keys()]
+    
+    # Convert lists to tensors
+    values_tensor = tf.stack(values, axis=0)
+    indices_tensor = tf.constant(indices, dtype=tf.int64)
+    
+    # Create a sparse tensor
+    sparse_tensor = tf.sparse.SparseTensor(indices=indices_tensor, values=values_tensor, dense_shape=[size, 1])
+    
+    return tf.sparse.reorder(sparse_tensor)
+
+def time_evoluted_config_amplitude(model, beta, graph_tuple, graph, sublattice_encoding):
+    graph_tuples_nonzero, amplitudes_gt=config_hamiltonian_product(graph_tuple, graph, sublattice_encoding)
+    final_amplitude=[]
+    for i, gt in enumerate(graph_tuples_nonzero):
+        amplitude, phase = model(gt)[0]
+        amplitude *= amplitudes_gt[i]
+        complex_coefficient=tf.complex(real=amplitude, imag=phase)
+
+        final_amplitude.append(complex_coefficient)
+    beta= -1.*beta
+    total_amplitude = tf.multiply(beta,tf.reduce_sum(tf.stack(final_amplitude)))
+    amplitude, phase = model(graph_tuple)[0]
+    complex_coefficient=tf.complex(real=amplitude, imag=phase)
+
+    total_amplitude = tf.add(complex_coefficient, total_amplitude)
+    return total_amplitude
+
+def time_evoluted_wave_function_on_batch(model_te, beta, graph_batch,graph, sublattice_encoding):
+    unique_data = {}  # Dictionary to store unique indices and their corresponding values
+    size=2**len(graph_batch[0].nodes)
+    # Compute the wave function components for each graph tuple
+    for graph_tuple in graph_batch:
+        #print(graph_batch_indices, type(graph_batch_indices))
+        # Extract the row index from the configuration
+        config=graph_tuple_toconfig(graph_tuple)
+        sparse_not= sites_to_sparse([config])[0][0]
+        row_index = sparse_not.indices[0]
+        # Check if the index is already in the dictionary
+        if row_index in unique_data:
+            pass  
+        else:
+            complex_coefficient=time_evoluted_config_amplitude(model_te, beta, graph_tuple, graph, sublattice_encoding)
+
+        
+            unique_data[row_index] = complex_coefficient  # Add new index and value to the dictionary
+    
+    # Convert dictionary to lists
+    values = list(unique_data.values())
+    indices = [[key, 0] for key in unique_data.keys()]
+    
+    # Convert lists to tensors
+    values_tensor = tf.stack(values, axis=0)
+    indices_tensor = tf.constant(indices, dtype=tf.int64)
+    
+    # Create a sparse tensor
+    sparse_tensor = tf.sparse.SparseTensor(indices=indices_tensor, values=values_tensor, dense_shape=[size, 1])
+ 
+    
+    return tf.sparse.reorder(sparse_tensor)
+def variational_wave_function_on_batch_v2(model, graph_batch):
+    unique_data = {}  # Dictionary to store unique indices and their corresponding values
+    size=2**len(graph_batch[0].nodes)
+    # Compute the wave function components for each graph tuple
+    for graph_tuple in graph_batch:
+        #print(graph_batch_indices, type(graph_batch_indices))
+        # Extract the row index from the configuration
+        config=graph_tuple_toconfig(graph_tuple)
+        sparse_not= sites_to_sparse([config])[0][0]
+        row_index = sparse_not.indices[0]        # Check if the index is already in the dictionary
+        if row_index in unique_data:
+            pass  # Sum up the values for repeated indices
+        else:
+            amplitude, phase = model(graph_tuple)[0]
+            # Convert amplitude to complex tensor with zero imaginary part
+            complex_coefficient=tf.complex(real=amplitude, imag=phase)
+
+        
+            unique_data[row_index] = complex_coefficient  # Add new index and value to the dictionary
+    
+    # Convert dictionary to lists
+    values = list(unique_data.values())
+    indices = [[key, 0] for key in unique_data.keys()]
+    
+    # Convert lists to tensors
+    values_tensor = tf.stack(values, axis=0)
+    indices_tensor = tf.constant(indices, dtype=tf.int64)
+    
+    # Create a sparse tensor
+    sparse_tensor = tf.sparse.SparseTensor(indices=indices_tensor, values=values_tensor, dense_shape=[size, 1])
+    
+    return tf.sparse.reorder(sparse_tensor)
+
+def sparse_tensor_exp_energy(wave_function, graph, J2):
+    #wave_conj= tf.sparse.map_values(tf.math.conj, wave_function)
+    bra=np.array(wave_function.values)
+    ket=np.array(wave_function.values)
+    bra_indices=np.array(wave_function.indices)[:, 0]
+    num_sites=len(graph.nodes)
+    bra_configs=sparse_list_to_configs(bra_indices,num_sites)
+    ket_configs=bra_configs
+    return square_2dham_exp(bra, graph, ket, J2, bra_configs, ket_configs)
+    
+
+
+def montecarlo_overlap_time_evoluted(te_coefficients, graph_tuples_te, model_var, graph_tuples_var):
+    expectation_over_te_distribution=0.
+    expectation_over_var_distribution=0.
+    coefficients_var_on_var=variational_wave_function_on_batch
+
+
+    pass
+def evolving_function(wave, Ham_tensor,beta):
+    wave=tf.sparse.reorder(wave)
+    auxphi= adjust_dtype_and_multiply(Ham_tensor,wave)
+    beta *= -1
+    phi=tf.sparse.map_values(tf.multiply,auxphi, beta)
+    #print(wave.indices,phi.indices)
+    
+    phi=tf.sparse.add(wave,tf.stop_gradient(phi))
+    #print(phi)
+    wave_with_0=tf.sparse.map_values(tf.multiply,phi, 0)
+    wave=tf.sparse.add(wave,wave_with_0)
+    psi_conj= tf.sparse.map_values(tf.math.conj, wave)
+    overlap=tf.sparse.map_values(tf.multiply,psi_conj,phi)
+    norm_wave = tf.norm(wave.values)
+    norm_ito_wave=tf.norm(phi.values)
+    
+    normalization=1/tf.math.sqrt(norm_wave*norm_ito_wave)
+    #print(normalization, 'This is the coefficient at denominator')
+    overlap_normalized=tf.sparse.map_values(tf.multiply,overlap,normalization)
+    return -overlap_normalized.values
