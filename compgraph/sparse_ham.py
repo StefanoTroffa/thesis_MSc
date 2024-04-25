@@ -3,24 +3,8 @@ import scipy.sparse
 
 from scipy.sparse import csr_matrix, eye
 import tensorflow as tf
-import numpy as np
-import qutip
 from qutip import tensor, jmat, qeye, Qobj
 
-def sites_to_sparse(base_config):
-    values=[]
-    configurations_in_sparse_notation=[]
-    for configuration in base_config:
-        value=0
-        for j in range(len(configuration)):
-            b= int(-1*(configuration[j]-1)*2**(len(configuration)-j-2))
-            value+=b
-
-        values.append(2**len(configuration)-value)
-        #print(value)
-        one_hot_vector = csr_matrix(([1], ([0], [2**len(configuration)-value-1])), shape=(1, 2 ** len(configuration)), dtype=np.int8)
-        configurations_in_sparse_notation.append(one_hot_vector) 
-    return configurations_in_sparse_notation, values
 #The following implementation just relies on basic libraries
 def compute_wave_function_csr(graph_tuples_batch, ansatz, configurations):
     #TO BE FIXED the wave function currently sums up same configurations coefficients if they are presented multiple times. What should I do here? 

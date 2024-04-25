@@ -83,16 +83,17 @@ def apply_edge_contribution(config, i, j):
 def square_2dham_exp(psi, graph, phi, J2, configs_psi, configs_phi):
     expectation_value = 0
     nd_to_index=node_to_index(graph)
+    graph = nx.relabel_nodes(graph, node_to_index(graph))
     ###NEED TO FIX THE POSSIBILITY OF NOT allowing DIFF DIMENSION BETWEEN GRAPH AND CONFIGURATIONS GIVEN
     # Define the coupling constants, we only need J2 as J1 can be set WLOG to 1 
     J2 = 2. # 
     J1=1. #Is fixed, we can vary only j2 because it is equivalent up to a constant factor -> Does not influence the eigenvectors, only the eigenvalues 
-    for (k,config_phi) in enumerate(configs_phi):
-        for (l,config_psi) in enumerate(configs_psi):
+    for (k,config_psi) in enumerate(configs_psi):
+        for (l,config_phi) in enumerate(configs_phi):
             # print(l,k, "Config", config_psi, config_phi)
             # print(psi, phi, "those are the states ")
             if are_configs_identical(config_phi,config_psi):
-                expectation_value += (J1+J2)*psi[l].conj()*phi[k]
+                expectation_value += (J1+J2)*psi[k].conj()*phi[l]
             elif configs_differ_by_two_sites(config_phi,config_psi):
                 for i, j in graph.edges:
                     # Map nodes to indices
@@ -105,7 +106,7 @@ def square_2dham_exp(psi, graph, phi, J2, configs_psi, configs_phi):
                         for new_config in off_diag:
                             # Check if the new configuration is identical to config_phi
                             if are_configs_identical(new_config, config_phi):
-                                expectation_value += 0.5*J1*psi[l].conj()*phi[k]
+                                expectation_value += 0.5*J1*psi[k].conj()*phi[l]
                             # to identify these pairs based on the geometry of your lattice.
                 for i in graph.nodes:
                     i_index = nd_to_index[i]
@@ -122,18 +123,7 @@ def square_2dham_exp(psi, graph, phi, J2, configs_psi, configs_phi):
 
     print("end of square 2d function")
     return expectation_value
-
-def config_hamiltonian_product(graph_tuple, graph, sublattice_encoding):
-    """
-    This function is an helper function to eventually compute the amplitudes of the time 
-    evoluted wave function.
-    config-> The configuration we want to project on given as a np.array or list of +-1s,
-    representing either spin up or down
-    graph-> is a networkx graph with edges and nodes, we are only interested in the edges
-    """
-    graph = nx.relabel_nodes(graph, node_to_index(graph))
-    #First function, the other one is built on this subroutine, that works also for just configurations
-    config= graph_tuple.nodes[:, 0].numpy()
+def config_hamiltonian_product(config, graph):
     configs=[]
     amplitudes=[]
     diagonal_contribution=0.
@@ -156,14 +146,28 @@ def config_hamiltonian_product(graph_tuple, graph, sublattice_encoding):
         configs.append(config)
         amplitudes.append(multiplier*diagonal_contribution) 
     
+    return np.array(configs), amplitudes
 
-    configs=np.array(configs)
+def graph_tuple_to_config_hamiltonian_product(graph_tuple, graph, sublattice_encoding):
+    """
+    This function is an helper function to eventually compute the amplitudes of the time 
+    evoluted wave function.
+    config-> The configuration we want to project on given as a np.array or list of +-1s,
+    representing either spin up or down
+    graph-> is a networkx graph with edges and nodes, we are only interested in the edges
+    """
+    graph = nx.relabel_nodes(graph, node_to_index(graph))
+    #First function, the other one is built on this subroutine, that works also for just configurations
+    config= graph_tuple.nodes[:, 0].numpy()
+    configs, amplitudes= config_hamiltonian_product(config, graph)
     #print('final configs from function nonzero amp', configs)        
 
     graph_tuples_generated=create_graph_tuples(configs, graph,sublattice_encoding) 
     
     return graph_tuples_generated, amplitudes
 
+
+#TODO add the diagonal contribution here, and copy the structure as for config_hamiltonian_product
 def configs_nonzeroamplitude_nnn(graph_tuple, graph, sublattice_encoding):
 
     config= graph_tuple.nodes[:, 0].numpy()

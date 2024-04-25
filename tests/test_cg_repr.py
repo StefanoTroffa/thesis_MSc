@@ -3,10 +3,11 @@ import numpy as np
 from compgraph.cg_repr import *
 import quimb as qu
 import networkx as nx
-from compgraph.useful import config_to_state, graph_tuple_toconfig, node_to_index, graph_tuple_list_to_configs_list, config_list_to_state_list, neel_state
-from compgraph.tensor_wave_functions import variational_wave_function_on_batch
-import itertools
+from compgraph.useful import config_to_state, graph_tuple_toconfig, node_to_index, graph_tuple_list_to_configs_list, config_list_to_state_list, neel_state, create_graph_from_ham, sites_to_sparse
 
+from compgraph.tensor_wave_functions import variational_wave_function_on_batch, sparse_tensor_exp_energy
+import itertools
+import tensorflow as tf
 class TestCgRepr(unittest.TestCase):
     def setUp(self) -> None:
         self.config= np.array([-1, -1, 1])
@@ -64,8 +65,7 @@ class TestCgRepr(unittest.TestCase):
         G = nx.relabel_nodes(G, mapping)
         sub_lattice_encoding=neel_state(G) 
         full_basis_configs = np.array([[int(x) for x in format(i, f'0{n*m}b')] for i in range(2**(n*m))]) * 2 - 1
-        based=np.array([[1, 1, 1, -1]])
-        print('based', based)
+
         for configuration in full_basis_configs:
             #config =np.array([[1, -1, -1, -1]])
             #check if digraph gives same as the function implemented
@@ -80,7 +80,7 @@ class TestCgRepr(unittest.TestCase):
             mat_vec= Hamiltonian @ psi
 
             site=create_graph_tuples(config, G, sub_lattice_encoding)
-            configurations_tuples, coefficients = config_hamiltonian_product(site[0], G, sub_lattice_encoding)
+            configurations_tuples, coefficients = graph_tuple_to_config_hamiltonian_product(site[0], G, sub_lattice_encoding)
             configurations_list= graph_tuple_list_to_configs_list(configurations_tuples)
             states=(config_list_to_state_list(configurations_list))
             scaled_states = [coeff * state for coeff, state in zip(coefficients, states)]
@@ -98,6 +98,45 @@ class TestCgRepr(unittest.TestCase):
         self.assertTrue(np.allclose(generated1,qu.up()&qu.down()&qu.up()))
     
     
+
+
+    def test_sparse_tensor_exp_energy(self):
+        n, m = 2, 2
+        num_sites = n * m
+        lattice_size = (n, m)
+        G = nx.grid_2d_graph(*lattice_size, periodic=True)
+        mapping = node_to_index(G)
+        G = nx.relabel_nodes(G, mapping)
+
+        # Generate random configurations and amplitudes
+        num_configs = 10  # Define how many random states you want to test
+        configurations = np.random.choice([-1, 1], size=(num_configs, num_sites))
+        amplitudes = np.random.rand(num_configs) + 1j * np.random.rand(num_configs)  # Random complex amplitudes
+
+        # Create sparse vector using TensorFlow
+        sparse_indices = sites_to_sparse(configurations)[0] # Get indices from your sites_to_sparse function
+        indices = [[idx.indices[0], 0] for idx in sparse_indices]  # Format indices for tf.sparseTensor
+
+        values_tensor = tf.stack(amplitudes, axis=0)
+        indices_tensor = tf.constant(indices, dtype=tf.int64)
+        print(indices_tensor)
+        sparse_tensor = tf.sparse.SparseTensor(indices=indices_tensor, values=values_tensor, dense_shape=[2**num_sites, 1])
+
+        # Compute energy using sparse_tensor_exp_energy
+        J2 = 1.0  # Example J2 value
+        computed_energy = sparse_tensor_exp_energy(sparse_tensor, G, 0)
+
+        # Convert configurations to states and compute expected energy using Hamiltonian
+        states = config_list_to_state_list(configurations)
+        scaled_states = [amp * state for amp, state in zip(amplitudes, states)]
+        psi_total = sum(scaled_states)  # Superposition of all states
+        Hamiltonian = qu.ham_heis_2D(n, m, j=1.0, bz=0, cyclic=True)
+        expected_energy = psi_total.H @ Hamiltonian @ psi_total
+
+        # Check if energies are close
+        self.assertTrue(np.allclose(computed_energy, expected_energy))
+
+
     #TODO Check that time_evoluted function is doing what it should do (similar syntax as test config_ham, but this time
     #we need to check that it has indeed the form (1- bH)|psi>; against configurations on lattice 2x2 and 3x3
     #Build a model as a test function that takes a graph_tuple and gives back a complex coefficient for each different graph_tuple configuration

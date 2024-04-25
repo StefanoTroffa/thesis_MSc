@@ -2,9 +2,9 @@ import tensorflow as tf
 from tensorflow.python.ops.linalg.sparse import sparse_csr_matrix_ops
 from scipy.sparse import coo_matrix
 import numpy as np
-from compgraph.cg_repr import config_hamiltonian_product, square_2dham_exp
+from compgraph.cg_repr import graph_tuple_to_config_hamiltonian_product, square_2dham_exp, config_hamiltonian_product
 from compgraph.useful import graph_tuple_toconfig, sparse_list_to_configs
-from compgraph.sparse_ham import sites_to_sparse
+from compgraph.useful import sites_to_sparse
 
 def convert_csr_to_sparse_tensor(csr_matrix):
     coo = coo_matrix(csr_matrix)
@@ -63,6 +63,7 @@ def compute_loss_tensor(psi_sparse, phi_sparse):
     loss = 1-numerator/tf.math.sqrt(norm)
     
     return loss
+
 def compute_wave_function_sparse_tensor(graph_tuples_batch, ansatz, configurations):
     size=2**len(graph_tuples_batch[0].nodes)
 
@@ -94,43 +95,8 @@ def compute_wave_function_sparse_tensor(graph_tuples_batch, ansatz, configuratio
     
     return sparse_tensor
 
-def compute_wave_function_sparse_tensor_u2(graph_tuples_batch, ansatz, configurations):
-    #### Through numerical simulation the runtime of the function that only gives unique values is approx equal to not check at all
-    unique_data = {}  # Dictionary to store unique indices and their corresponding values
-    size=2**len(graph_tuples_batch[0].nodes)
-    # Compute the wave function components for each graph tuple
-    for idx, graph_tuple in enumerate(graph_tuples_batch):
-        amplitude, phase = ansatz(graph_tuple)[0]
-        # Convert amplitude to complex tensor with zero imaginary part
-        amplitude_complex = tf.complex(real=amplitude, imag=tf.zeros_like(amplitude))
-        
-        # Compute the complex coefficient using TensorFlow operations
-        complex_coefficient = amplitude_complex * tf.math.exp(tf.complex(real=0.0, imag=phase))
-        
-        # Extract the row index from the configuration
-        row_index = configurations[idx].indices[0]
-        
-        # Check if the index is already in the dictionary
-        if row_index in unique_data:
-            pass  # Sum up the values for repeated indices
-        else:
-            unique_data[row_index] = complex_coefficient  # Add new index and value to the dictionary
-    
-    # Convert dictionary to lists
-    values = list(unique_data.values())
-    indices = [[key, 0] for key in unique_data.keys()]
-    
-    # Convert lists to tensors
-    values_tensor = tf.stack(values, axis=0)
-    indices_tensor = tf.constant(indices, dtype=tf.int64)
-    
-    # Create a sparse tensor
-    sparse_tensor = tf.sparse.SparseTensor(indices=indices_tensor, values=values_tensor, dense_shape=[size, 1])
-    
-    return sparse_tensor
 
-
-
+#TODO deprecated, eliminate this function and substitute all recurrences with v2
 def variational_wave_function_on_batch(model, graph_batch, graph_batch_indices):
     unique_data = {}  # Dictionary to store unique indices and their corresponding values
     size=2**len(graph_batch[0].nodes)
@@ -164,7 +130,7 @@ def variational_wave_function_on_batch(model, graph_batch, graph_batch_indices):
     return tf.sparse.reorder(sparse_tensor)
 
 def time_evoluted_config_amplitude(model, beta, graph_tuple, graph, sublattice_encoding):
-    graph_tuples_nonzero, amplitudes_gt=config_hamiltonian_product(graph_tuple, graph, sublattice_encoding)
+    graph_tuples_nonzero, amplitudes_gt=graph_tuple_to_config_hamiltonian_product(graph_tuple, graph, sublattice_encoding)
     final_amplitude=[]
     for i, gt in enumerate(graph_tuples_nonzero):
         amplitude, phase = model(gt)[0]
@@ -247,13 +213,27 @@ def variational_wave_function_on_batch_v2(model, graph_batch):
 
 def sparse_tensor_exp_energy(wave_function, graph, J2):
     #wave_conj= tf.sparse.map_values(tf.math.conj, wave_function)
-    bra=np.array(wave_function.values)
+    wave_conj=tf.sparse.map_values(tf.math.conj, wave_function)
     ket=np.array(wave_function.values)
+    bra=np.array(wave_conj.values)
+
     bra_indices=np.array(wave_function.indices)[:, 0]
     num_sites=len(graph.nodes)
     bra_configs=sparse_list_to_configs(bra_indices,num_sites)
+    print(bra_configs)
     ket_configs=bra_configs
-    return square_2dham_exp(bra, graph, ket, J2, bra_configs, ket_configs)
+    exp_value=0.
+    
+    for idx_bra, config_bra in enumerate(bra_configs):
+        configurations_nonzero, coefficients = config_hamiltonian_product(config_bra, graph)
+        for idx_ket,config_ket in enumerate(ket_configs):
+            match_indices = np.where(np.all(configurations_nonzero == config_ket, axis=1))[0]
+            if match_indices.size > 0:
+                idx_nonzero = match_indices[0]  # Assuming the first match's index if multiple matches
+                coefficient = coefficients[idx_nonzero]  # Get the corresponding coefficient
+                exp_value += ket[idx_ket] * bra[idx_bra] * coefficient
+        
+    return exp_value
     
 
 

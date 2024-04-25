@@ -1,3 +1,4 @@
+from scipy.sparse import csr_matrix
 import sonnet as snt
 import tensorflow as tf
 import numpy as np
@@ -94,7 +95,6 @@ def neel_state(graph):
     sublattice_encoding[::2, 0] = 1  # Sublattice 1
     sublattice_encoding[1::2, 1] = 1  # Sublattice 2 
     return sublattice_encoding
-import networkx as nx
 
 def create_graph_from_ham(geometric_structure, lattice_size, sub_lattice_encoding):
     if geometric_structure == "2d_square":
@@ -142,3 +142,19 @@ def sparse_list_to_configs(sparse_indices, num_sites):
         configs.append(config)
     conf_array=np.array(configs)
     return conf_array
+
+
+def sites_to_sparse(base_config):
+    values=[]
+    configurations_in_sparse_notation=[]
+    for configuration in base_config:
+        value=0
+        for j in range(len(configuration)):
+            b= int(-1*(configuration[j]-1)*2**(len(configuration)-j-2))
+            value+=b
+
+        values.append(2**len(configuration)-value)
+        #print(value)
+        one_hot_vector = csr_matrix(([1], ([0], [2**len(configuration)-value-1])), shape=(1, 2 ** len(configuration)), dtype=np.int8)
+        configurations_in_sparse_notation.append(one_hot_vector)
+    return configurations_in_sparse_notation, values
