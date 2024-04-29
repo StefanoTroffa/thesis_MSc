@@ -5,6 +5,8 @@ import numpy as np
 from graph_nets import utils_np, utils_tf
 import quimb as qu
 import networkx as nx
+import tensorflow as tf
+import sonnet as snt
 def node_to_index(graph):
     nodes_idx = {node: i for i, node in enumerate(graph.nodes)}
     return nodes_idx
@@ -26,6 +28,62 @@ def list_layers(module, prefix=''):
             # Recursively list layers.
             list_layers(attr, prefix=prefix + '  ')
     return
+
+def compare_sonnet_modules(module_a, module_b):
+    """
+    Compares two Sonnet modules to determine if they have identical architectures and weights,
+    ignoring whether the weights are trainable or not.
+    
+    Args:
+        module_a (snt.Module): First module to compare.
+        module_b (snt.Module): Second module to compare.
+    
+    Returns:
+        bool: True if both the architecture and weights are identical, False otherwise.
+    """
+    # Fetch all variables, not just trainable ones
+    variables_a = {v.name: v for v in module_a.variables}
+    variables_b = {v.name: v for v in module_b.variables}
+
+    # Compare variable sets
+    if variables_a.keys() != variables_b.keys():
+        return False
+
+    # Compare each variable by name and value
+    for name, var_a in variables_a.items():
+        var_b = variables_b[name]
+        if var_a.shape != var_b.shape or not tf.reduce_all(tf.equal(var_a, var_b)).numpy():
+            return False
+
+    return True
+
+
+def update_model_weights_and_trainability(source_model, target_model, trainable=False):
+    """
+    Copies weights from the source model to the target model and sets the trainability
+    of the target model's weights by recreating them as needed.
+    
+    Args:
+        source_model (snt.Module): Model from which weights are copied.
+        target_model (snt.Module): Model to which weights are copied.
+        trainable (bool): Whether the target model's weights should be trainable.
+    """
+
+
+    # Recreate each variable in the target model with the desired trainable status
+    with tf.init_scope():
+        for src_var in source_model.variables:
+            # Find the corresponding variable in the target model by name
+            tgt_var = next((v for v in target_model.variables if v.name == src_var.name), None)
+            if tgt_var:
+                # Define a new variable with the same value but updated `trainable` flag
+                new_var = tf.Variable(src_var.read_value(), trainable=trainable, name=tgt_var.name[:-2])  # Remove ':0' from variable name
+                # Replace the variable in the target model's attribute
+                setattr(target_model, tgt_var.name.split(':')[0], new_var)
+
+
+
+
 
 
 def create_graph_tuples(configs, graph,sublattice_encoding, global_par=0.05, edge_par=0.5):
@@ -88,6 +146,13 @@ def config_to_state(config):
             psi_temp=qu.down()    
         psi_list.append(psi_temp)
     return qu.kron(*psi_list)
+
+def state_from_config_amplitudes(configurations, amplitudes):
+        # Convert configurations to states and compute expected energy using Hamiltonian
+        states = config_list_to_state_list(configurations)
+        scaled_states = [amp * state for amp, state in zip(amplitudes, states)]
+        superposition_state = sum(scaled_states)  # Superposition of all states
+        return superposition_state
 
 def neel_state(graph):
     num_sites=len(graph.nodes)

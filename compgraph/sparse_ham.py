@@ -5,6 +5,7 @@ from scipy.sparse import csr_matrix, eye
 import tensorflow as tf
 from qutip import tensor, jmat, qeye, Qobj
 
+
 #The following implementation just relies on basic libraries
 def compute_wave_function_csr(graph_tuples_batch, ansatz, configurations):
     #TO BE FIXED the wave function currently sums up same configurations coefficients if they are presented multiple times. What should I do here? 
