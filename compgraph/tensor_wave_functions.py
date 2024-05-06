@@ -177,7 +177,8 @@ def sparse_tensor_exp_energy(wave_function, graph, J2):
     #print(bra_configs)
     ket_configs=bra_configs
     exp_value=0.
-    
+    normalization_factor= 1/tf.norm(wave_function.values)
+
     for idx_bra, config_bra in enumerate(bra_configs):
         configurations_nonzero, coefficients = config_hamiltonian_product(config_bra, graph)
         for idx_ket,config_ket in enumerate(ket_configs):
@@ -187,12 +188,14 @@ def sparse_tensor_exp_energy(wave_function, graph, J2):
                 coefficient = coefficients[idx_nonzero]  # Get the corresponding coefficient
                 exp_value += ket[idx_ket] * bra[idx_bra] * coefficient
         
-    return exp_value
+    return exp_value*normalization_factor**2
+
     
 
 def calculate_sparse_overlap(left_part, right_part):
     """
     Calculate the overlap using sparse tensors for coefficients.
+    This computation calculates: <psi|phi> without the square module.
     sparse_coefficients_te_on: SparseTensor of time-evolved model coefficients.
     sparse_coefficients_var_on: SparseTensor of variational model coefficients.
     """
@@ -234,26 +237,19 @@ def montecarlo_logloss_overlap_time_evoluted(coefficients_te_on_te, graph_tuples
     normalization=1/(norm_wave*norm_te_wave)**2
 
     overlap=tf.math.sqrt(overlap_over_te_distribution*overlap_over_var_distribution*normalization)
-    print("normalized? overlap according to MC function", overlap_over_te_distribution*overlap_over_var_distribution*normalization)
+    print("Overlap according to MC function", overlap_over_te_distribution*overlap_over_var_distribution*normalization)
     return -tf.math.log(overlap)
 
-def evolving_function(wave, Ham_tensor,beta):
-    wave=tf.sparse.reorder(wave)
-    auxphi= adjust_dtype_and_multiply(Ham_tensor,wave)
-    beta *= -1
-    phi=tf.sparse.map_values(tf.multiply,auxphi, beta)
 
-
-    phi=tf.sparse.add(wave,tf.stop_gradient(phi))
-    #print(phi)
-    wave_with_0=tf.sparse.map_values(tf.multiply,phi, 0)
-    wave=tf.sparse.add(wave,wave_with_0)
-    psi_conj= tf.sparse.map_values(tf.math.conj, wave)
-    overlap=tf.sparse.map_values(tf.multiply,psi_conj,phi)
-    norm_wave = tf.norm(wave.values)
-    norm_ito_wave=tf.norm(phi.values)
+def quimb_vec_to_sparse(vector, configurations, num_sites):
+    ampl = np.array(vector).flatten()
+    # Check if the vector is complex
+    if np.iscomplexobj(ampl):
+        ampl_complex = tf.convert_to_tensor(ampl, dtype=tf.complex128)
+    else:
+        # If not complex, create the complex tensor
+        ampl_complex = tf.complex(ampl, tf.zeros_like(ampl))
     
-    normalization=1/tf.math.sqrt(norm_wave*norm_ito_wave)
-    #print(normalization, 'This is the coefficient at denominator')
-    overlap_normalized=tf.sparse.map_values(tf.multiply,overlap,normalization)
-    return -overlap_normalized.values
+    # Create the sparse tensor from configurations and complex amplitudes
+    sp2 = create_sparsetensor_from_configs_amplitudes(configurations, ampl_complex, num_sites)
+    return sp2

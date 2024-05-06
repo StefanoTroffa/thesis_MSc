@@ -4,9 +4,14 @@ This project aims to replicate the results presented in the paper [Title of Pape
 
 ## Code Structure
 
-The code is organized into several key components:
+The code is organized into few distinct components:
 
 - **compgraph**: Contains folders with helper functions and a Jupyter notebook that demonstrates the basic implementation of the project's core idea.
+- **tests**: Contains folder with test functions. Some test functions are simply sanity checks on the consistency of data handling, for the bulk of the code, every quantity that we computed has been tested against Quimb library
+
+- **notebooks**: This comprises notebooks to clarify the workflow and show the main milestones achieved during the project, along with an example usage of the project functions. 
+
+
 
 ## Project Description
 

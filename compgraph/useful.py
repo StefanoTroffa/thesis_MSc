@@ -223,3 +223,29 @@ def sites_to_sparse(base_config):
         one_hot_vector = csr_matrix(([1], ([0], [2**len(configuration)-value-1])), shape=(1, 2 ** len(configuration)), dtype=np.int8)
         configurations_in_sparse_notation.append(one_hot_vector)
     return configurations_in_sparse_notation, values
+
+def compare_sonnet_modules(snt1, snt2):
+    # Ensure both modules have the same number of variables
+    if len(snt1.variables) == len(snt2.variables):
+        print("The two modules have the same number of layers parameters")
+        
+        # Iterate over pairs of variables
+        for i, (var1, var2) in enumerate(zip(snt1.variables, snt2.variables)):
+            # Compare the values of the variables
+            if not tf.reduce_all(tf.equal(var1, var2)):
+                print(f"Comparison failed at index {i}, {var1.name} is different than {var2.name}")
+                return False
+            
+
+    else:
+        print("The two modules do not have the same number of variables")
+        return False
+    return True
+
+def copy_to_non_trainable(module_a, module_b):
+    copy_weights = tf.group(*[vb.assign(va) for va, vb in zip(module_a.variables, module_b.variables)])
+    
+    for var in module_b.variables:
+        var._trainable = False 
+    return
+

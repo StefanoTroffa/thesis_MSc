@@ -5,7 +5,7 @@ import networkx as nx
 from compgraph.cg_repr import *
 from compgraph.useful import create_graph_tuples, node_to_index, graph_tuple_list_to_configs_list, config_list_to_state_list, neel_state, create_graph_from_ham, sites_to_sparse, state_from_config_amplitudes, config_to_state
 from compgraph.gnn_src_code import GNN_double_output
-from compgraph.tensor_wave_functions import variational_wave_function_on_batch, sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes, time_evoluted_wave_function_on_batch, montecarlo_logloss_overlap_time_evoluted, calculate_sparse_overlap
+from compgraph.tensor_wave_functions import variational_wave_function_on_batch, sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes, time_evoluted_wave_function_on_batch, montecarlo_logloss_overlap_time_evoluted, calculate_sparse_overlap, quimb_vec_to_sparse
 import itertools
 import tensorflow as tf
 
@@ -110,6 +110,31 @@ class TestMonteCarlofunctions(unittest.TestCase):
             self.assertTrue(np.allclose(computed_energy_right,expected_energy_right))
             self.assertTrue(np.allclose(computed_energy_left,expected_energy_left))
             self.assertTrue(np.allclose(overlap_left_right, ovl))
+    
+    def test_quimb_to_vec(self):
+        n, m = 2, 2
+        num_sites = n * m
+        lattice_size = (n, m)
+        G = nx.grid_2d_graph(*lattice_size, periodic=True)
+        mapping = node_to_index(G)
+        G = nx.relabel_nodes(G, mapping)
+        n_tests= num_sites*2
+        for i in range(n_tests):
+            # Generate random configurations and amplitudes
+            full_basis_configs = np.array([[int(x) for x in format(i, f'0{n*m}b')] for i in range(2**(n*m))]) * 2 - 1
+            num_configs = len(full_basis_configs)  # Define how many random states you want to test
+
+            amplitudes= np.random.rand(num_configs) + 1j * np.random.rand(num_configs)  # Random complex amplitudes
+            # Compute energy using sparse_tensor_exp_energy
+            sparse_tensor=create_sparsetensor_from_configs_amplitudes(full_basis_configs, amplitudes, num_sites)
+
+            psi = state_from_config_amplitudes(full_basis_configs, amplitudes)
+            sparse_from_qu= quimb_vec_to_sparse(psi,full_basis_configs, len(G.nodes))
+            #print(overlap_left_right, ovl)
+            # Check if energies are close
+            print(sparse_from_qu, sparse_tensor)
+            self.assertTrue(np.allclose(sparse_tensor.values,sparse_from_qu.values))
+
 
 
 if __name__ == '__main__':
