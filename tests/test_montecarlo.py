@@ -3,7 +3,7 @@ import numpy as np
 import quimb as qu
 import networkx as nx
 from compgraph.cg_repr import *
-from compgraph.useful import create_graph_tuples, node_to_index, graph_tuple_list_to_configs_list, config_list_to_state_list, neel_state, create_graph_from_ham, sites_to_sparse, state_from_config_amplitudes, config_to_state
+from compgraph.useful import create_graph_tuples, node_to_index, neel_state, state_from_config_amplitudes
 from compgraph.gnn_src_code import GNN_double_output
 from compgraph.tensor_wave_functions import variational_wave_function_on_batch, sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes, time_evoluted_wave_function_on_batch, montecarlo_logloss_overlap_time_evoluted, calculate_sparse_overlap, quimb_vec_to_sparse
 import itertools
@@ -59,18 +59,17 @@ class TestMonteCarlofunctions(unittest.TestCase):
             # Compute expected states and overlap
             psi = state_from_config_amplitudes(full_basis_configs, amplitudes)
             psi_te=state_from_config_amplitudes(full_basis_configs, np.array(sparse_coefficients_te.values))
-            psi_te2 = psi - beta * graph_hamiltonian@psi
+            #psi_te2 = psi - beta * graph_hamiltonian@psi
             #print(psi_te-psi_te2)
 
             #print("Confronting psi and the state version of it \n", psi, 'vs', sparse_coefficients_var)
             #print("Confronting psi t.e. and the state version of it \n", psi_te, 'vs', sparse_coefficients_te)
             #print(psi_te1, 'vs', psi_te)
             overlap = psi.H@psi_te * psi_te.H@psi
-            normalized_overlap = overlap / (qu.norm(psi) * qu.norm(psi_te))
-
+            normalized_overlap = tf.math.sqrt(overlap) / (qu.norm(psi) * qu.norm(psi_te))
             #print('norm psi', qu.norm(psi),tf.norm(sparse_coefficients_var.values), psi.H@psi)
             #print("Normalized overlap according to quimb", overlap, 'left part and tight part',psi.H@psi_te, psi_te.H@psi)
-            expected_logloss = -tf.math.log(tf.math.sqrt((normalized_overlap)))
+            expected_logloss = -tf.math.log(((normalized_overlap)))
 
             # Assert the computed and expected logloss are close
             self.assertTrue(np.isclose(computed_logloss, expected_logloss), f"Failed on test {i}: Computed {computed_logloss}, Expected {expected_logloss}")
@@ -100,15 +99,18 @@ class TestMonteCarlofunctions(unittest.TestCase):
 
             psi_right=state_from_config_amplitudes(full_basis_configs, amplitudes_right)
             psi_left = state_from_config_amplitudes(full_basis_configs, amplitudes_left)
+            print(psi_right, sparse_tensor_right.values)
+
             Hamiltonian = qu.ham_heis_2D(n, m, j=1.0, bz=0, cyclic=True)
             expected_energy_right = psi_right.H @ Hamiltonian @ psi_right
             expected_energy_left = psi_left.H @ Hamiltonian @ psi_left
             overlap_left_right= calculate_sparse_overlap(sparse_tensor_left,sparse_tensor_right )
             ovl= psi_left.H@psi_right
-            #print(overlap_left_right, ovl)
+
+            print(overlap_left_right, ovl)
             # Check if energies are close
-            self.assertTrue(np.allclose(computed_energy_right,expected_energy_right))
-            self.assertTrue(np.allclose(computed_energy_left,expected_energy_left))
+            self.assertTrue(np.allclose(computed_energy_right,expected_energy_right/qu.norm(psi_right)**2))
+            self.assertTrue(np.allclose(computed_energy_left,expected_energy_left/qu.norm(psi_left)**2))
             self.assertTrue(np.allclose(overlap_left_right, ovl))
     
     def test_quimb_to_vec(self):
@@ -122,6 +124,8 @@ class TestMonteCarlofunctions(unittest.TestCase):
         for i in range(n_tests):
             # Generate random configurations and amplitudes
             full_basis_configs = np.array([[int(x) for x in format(i, f'0{n*m}b')] for i in range(2**(n*m))]) * 2 - 1
+            print(full_basis_configs)
+            
             num_configs = len(full_basis_configs)  # Define how many random states you want to test
 
             amplitudes= np.random.rand(num_configs) + 1j * np.random.rand(num_configs)  # Random complex amplitudes
@@ -132,7 +136,7 @@ class TestMonteCarlofunctions(unittest.TestCase):
             sparse_from_qu= quimb_vec_to_sparse(psi,full_basis_configs, len(G.nodes))
             #print(overlap_left_right, ovl)
             # Check if energies are close
-            print(sparse_from_qu, sparse_tensor)
+            print(psi, sparse_tensor.values,amplitudes)
             self.assertTrue(np.allclose(sparse_tensor.values,sparse_from_qu.values))
 
 

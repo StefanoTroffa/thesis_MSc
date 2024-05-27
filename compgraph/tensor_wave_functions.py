@@ -237,7 +237,7 @@ def montecarlo_logloss_overlap_time_evoluted(coefficients_te_on_te, graph_tuples
     normalization=1/(norm_wave*norm_te_wave)**2
 
     overlap=tf.math.sqrt(overlap_over_te_distribution*overlap_over_var_distribution*normalization)
-    print("Overlap according to MC function", overlap_over_te_distribution*overlap_over_var_distribution*normalization)
+    #print("Overlap according to MC function", overlap_over_te_distribution*overlap_over_var_distribution*normalization)
     return -tf.math.log(overlap)
 
 
@@ -252,4 +252,4 @@ def quimb_vec_to_sparse(vector, configurations, num_sites):
     
     # Create the sparse tensor from configurations and complex amplitudes
     sp2 = create_sparsetensor_from_configs_amplitudes(configurations, ampl_complex, num_sites)
-    return sp2
+    return  tf.sparse.reorder(sp2)

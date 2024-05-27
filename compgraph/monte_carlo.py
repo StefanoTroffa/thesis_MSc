@@ -23,15 +23,9 @@ def monte_carlo_update(graph_tuple, gnn, N_sweeps):
         if np.random.rand() < p_accept:
             graph_tuple = proposed_graph_tuple
             
-            # Update the corresponding configuration
-            value = 0
-            for j in range(len(proposed_nodes)):
-                b = int(-1 * (proposed_nodes[j, 0] - 1) * 2 ** (j - 1))
-                value += b
-            one_hot_vector = csr_matrix(([1], ([0], [value])), shape=(1, 2 ** len(proposed_nodes)), dtype=np.int8)
-            configuration = one_hot_vector
 
-    return graph_tuple, configuration
+
+    return graph_tuple
 
 ###FIND OUT WHY THIS DOES NOT WORK
 def parallel_monte_carlo_update(graph_tuples, gnn, N_sweeps):
@@ -48,6 +42,7 @@ def sequential_monte_carlo_update(graph_tuples, gnn, N_sweeps):
 def process_batch(batch):
     graph_tuple, gnn, N_sweeps = batch
     return monte_carlo_update(graph_tuple, gnn, N_sweeps)
+
 
 """
 def process_batch(batch):

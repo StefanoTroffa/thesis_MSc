@@ -3,8 +3,8 @@ import numpy as np
 from compgraph.cg_repr import *
 import quimb as qu
 import networkx as nx
-from compgraph.useful import config_to_state, node_to_index, graph_tuple_list_to_configs_list, config_list_to_state_list, neel_state, create_graph_from_ham, sites_to_sparse, state_from_config_amplitudes
-from compgraph.tensor_wave_functions import sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes, quimb_vec_to_sparse
+from compgraph.useful import config_to_state, node_to_index, graph_tuple_list_to_configs_list, config_list_to_state_list, neel_state, state_from_config_amplitudes
+from compgraph.tensor_wave_functions import sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes
 import itertools
 import tensorflow as tf
 class TestCgRepr(unittest.TestCase):
@@ -91,10 +91,10 @@ class TestCgRepr(unittest.TestCase):
     def test_config_to_state(self):
         config=np.array([1])
         generated1=config_to_state(config)
-        self.assertTrue(np.allclose(generated1,qu.up()))
+        self.assertTrue(np.allclose(generated1,qu.down()))
         config=np.array([1,-1,1])
         generated1=config_to_state(config)
-        self.assertTrue(np.allclose(generated1,qu.up()&qu.down()&qu.up()))
+        self.assertTrue(np.allclose(generated1,qu.down()&qu.up()&qu.down()))
     
     
 

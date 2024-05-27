@@ -10,6 +10,18 @@ import sonnet as snt
 def node_to_index(graph):
     nodes_idx = {node: i for i, node in enumerate(graph.nodes)}
     return nodes_idx
+
+def visualize_weights(module, prefix=''):
+    """
+    Recursively list the layers and sub-layers of a TensorFlow/Sonnet module,
+    and visualize their weights if they have any.
+    """
+    if isinstance(module, (tf.Module, tf.keras.layers.Layer, snt.Module)):
+        for weight in module.variables:
+            print(f"{prefix}{weight.name}: values {weight.shape}")
+    return
+       
+
 def list_layers(module, prefix=''):
     """
     Recursively list the layers and sub-layers of a TensorFlow/Sonnet module.
@@ -28,62 +40,6 @@ def list_layers(module, prefix=''):
             # Recursively list layers.
             list_layers(attr, prefix=prefix + '  ')
     return
-
-def compare_sonnet_modules(module_a, module_b):
-    """
-    Compares two Sonnet modules to determine if they have identical architectures and weights,
-    ignoring whether the weights are trainable or not.
-    
-    Args:
-        module_a (snt.Module): First module to compare.
-        module_b (snt.Module): Second module to compare.
-    
-    Returns:
-        bool: True if both the architecture and weights are identical, False otherwise.
-    """
-    # Fetch all variables, not just trainable ones
-    variables_a = {v.name: v for v in module_a.variables}
-    variables_b = {v.name: v for v in module_b.variables}
-
-    # Compare variable sets
-    if variables_a.keys() != variables_b.keys():
-        return False
-
-    # Compare each variable by name and value
-    for name, var_a in variables_a.items():
-        var_b = variables_b[name]
-        if var_a.shape != var_b.shape or not tf.reduce_all(tf.equal(var_a, var_b)).numpy():
-            return False
-
-    return True
-
-
-def update_model_weights_and_trainability(source_model, target_model, trainable=False):
-    """
-    Copies weights from the source model to the target model and sets the trainability
-    of the target model's weights by recreating them as needed.
-    
-    Args:
-        source_model (snt.Module): Model from which weights are copied.
-        target_model (snt.Module): Model to which weights are copied.
-        trainable (bool): Whether the target model's weights should be trainable.
-    """
-
-
-    # Recreate each variable in the target model with the desired trainable status
-    with tf.init_scope():
-        for src_var in source_model.variables:
-            # Find the corresponding variable in the target model by name
-            tgt_var = next((v for v in target_model.variables if v.name == src_var.name), None)
-            if tgt_var:
-                # Define a new variable with the same value but updated `trainable` flag
-                new_var = tf.Variable(src_var.read_value(), trainable=trainable, name=tgt_var.name[:-2])  # Remove ':0' from variable name
-                # Replace the variable in the target model's attribute
-                setattr(target_model, tgt_var.name.split(':')[0], new_var)
-
-
-
-
 
 
 def create_graph_tuples(configs, graph,sublattice_encoding, global_par=0.05, edge_par=0.5):
@@ -141,9 +97,9 @@ def config_to_state(config):
     psi_list=[]
     for i in config:
         if i==1:
-            psi_temp=qu.up()
+            psi_temp=qu.down()
         else:
-            psi_temp=qu.down()    
+            psi_temp=qu.up()    
         psi_list.append(psi_temp)
     return qu.kron(*psi_list)
 
@@ -161,26 +117,12 @@ def neel_state(graph):
     sublattice_encoding[1::2, 1] = 1  # Sublattice 2 
     return sublattice_encoding
 
-def create_graph_from_ham(geometric_structure, lattice_size, sub_lattice_encoding):
-    if geometric_structure == "2d_square":
-        # Create a square lattice with periodic boundary conditions
-        G = nx.grid_2d_graph(*lattice_size, periodic=True)
-        
-        # Relabel the nodes to use integers
-        mapping = node_to_index(G)
-        G = nx.relabel_nodes(G, mapping)
-        
-        # Add 'features' to nodes
-        for node in G.nodes():
-            G.nodes[node]['features'] = sub_lattice_encoding[node]
-        
-        # Add the same 'features' to both directions of each edge
-        for edge in G.edges():
-            G.edges[edge]['features'] = [1.0]  # Example feature for edges
-        
-        return G
-    else:
-        raise NotImplementedError("The specified geometric structure is not implemented")
+def create_2d_square_graph(lattice_size):
+    G = nx.grid_2d_graph(*lattice_size, periodic=True)
+    G = nx.relabel_nodes(G, node_to_index(G))
+    return G
+
+
 
 def sparse_to_config(row_index, num_sites):
     """
@@ -215,12 +157,12 @@ def sites_to_sparse(base_config):
     for configuration in base_config:
         value=0
         for j in range(len(configuration)):
-            b= int(-1*(configuration[j]-1)*2**(len(configuration)-j-2))
+            b= int((-1*(configuration[j]-1))*2**(len(configuration)-j-2))
             value+=b
 
-        values.append(2**len(configuration)-value)
+        values.append(value)
         #print(value)
-        one_hot_vector = csr_matrix(([1], ([0], [2**len(configuration)-value-1])), shape=(1, 2 ** len(configuration)), dtype=np.int8)
+        one_hot_vector = csr_matrix(([1], ([0], [value])), shape=(1, 2 ** len(configuration)), dtype=np.int8)
         configurations_in_sparse_notation.append(one_hot_vector)
     return configurations_in_sparse_notation, values
 
