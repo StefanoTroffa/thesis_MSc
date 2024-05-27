@@ -36,6 +36,6 @@ inputfile_thes
 # We do not store checkpoints of jupyter notebooks
 .ipynb_checkpoints
 Notebook_clear.ipynb
+LastVersionNotebook.ipynb
 garbage_coll.py
 config.py
-LastVersionNotebook.ipynb
