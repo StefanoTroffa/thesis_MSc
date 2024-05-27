@@ -9,6 +9,11 @@ The code is organized into several key components:
 
 - **compgraph**: Contains folders with helper functions and a Jupyter notebook that demonstrates the basic implementation of the project's core idea.
 
+- **tests**: Contains folder with test functions. Some test functions are simply sanity checks on the consistency of data handling, for the bulk of the code, every quantity that we computed has been tested against Quimb library
+
+- **notebooks**: This comprises notebooks to clarify the workflow and show the main milestones achieved during the project, along with an example usage of the project functions. 
+
+
 ## Project Description
 
 The purpose of this codebase is to compute approximate ground states using a computational graph. This method serves as a proxy for the ansatz that generates the wave function weights, an innovative approach first introduced by Carleo in 2016. For more information, see the paper ["Solving the Quantum Many-Body Problem with Artificial Neural Networks"](https://arxiv.org/abs/1606.02318).
