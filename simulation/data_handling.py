@@ -65,10 +65,11 @@ def log_results(results):
     """ Log the results of the simulation. """
     logging.info("========= SIMULATION RESULTS ==========")
     for key, value in results.items():
-        if len(value)>1:
-            value= value[-1]
+        if isinstance(value, (list, tuple)) and len(value) > 1:
+            value = value[-1]
         logging.info(f"{key}: {value}")
     logging.info("=======================================")
+
 
 
 def setup_logging(hyperparams, log_directory='logs'):

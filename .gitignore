@@ -39,3 +39,4 @@ Notebook_clear.ipynb
 LastVersionNotebook.ipynb
 garbage_coll.py
 config.py
+slurm*
