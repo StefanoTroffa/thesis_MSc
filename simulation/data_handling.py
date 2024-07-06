@@ -128,7 +128,7 @@ def run_simulation(hyperparams):
     logger.info("Models initialized.")
 
     # Generate tuples of graphs for variational training and fixed comparisons
-    graph_tuples_v = initialize_graph_tuples(
+    graph_tuples_var = initialize_graph_tuples(
         hyperparams['sim_params']['n_batch'] * hyperparams['sim_params']['batch_size'],
         graph, subl, hyperparams['sim_params']['full_size_hilbert']
     )
@@ -142,7 +142,7 @@ def run_simulation(hyperparams):
         hyperparams['sim_params']['outer_loop'], hyperparams['sim_params']['inner_loop'],
         subl, graph, hyperparams['sim_params']['batch_size'], lowest_eigenstate_as_sparse,
         hyperparams['sim_params']['beta'], hyperparams['sim_params']['learning_rate'],
-        model_w, model_fix, graph_tuples_v, graph_tuples_fix
+        model_w, model_fix, graph_tuples_var, graph_tuples_fix
     )
 
     # Collect all results for DataFrame construction

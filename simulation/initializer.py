@@ -155,7 +155,7 @@ def initialize_hamiltonian_and_groundstate(graph_params, full_basis_configs):
 
     return lowest_eigenstate_as_sparse
     
-def initialize_graph_tuples(n_configs, graph, sublattice_encoding, full_size_hilbert):
+def initialize_graph_tuples(n_configs, graph, sublattice_encoding, full_size_hilbert=None):
     """
     Initialize graph data by generating either full basis configurations for the entire Hilbert space 
     or a specified number of random basis configurations, and creating corresponding graph tuples.

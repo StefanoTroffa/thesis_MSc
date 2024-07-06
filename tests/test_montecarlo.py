@@ -33,7 +33,7 @@ class TestMonteCarlofunctions(unittest.TestCase):
         sublattice_enc = neel_state(G)
         graph_hamiltonian = qu.ham_heis_2D(n, m, j=1.0, bz=0, cyclic=True, sparse=True)
         beta = 0.05
-        model_var = GNN_double_output()
+        model_var = GNN_double_output(32,16)
 
         # Simulate multiple tests
         n_tests = num_sites * 2
@@ -138,6 +138,7 @@ class TestMonteCarlofunctions(unittest.TestCase):
             # Check if energies are close
             print(psi, sparse_tensor.values,amplitudes)
             self.assertTrue(np.allclose(sparse_tensor.values,sparse_from_qu.values))
+    #def test_proposed_tuples(self):
 
 
 

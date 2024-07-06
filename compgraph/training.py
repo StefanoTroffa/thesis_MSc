@@ -6,7 +6,7 @@ from compgraph.tensor_wave_functions import variational_wave_function_on_batch, 
 from compgraph.tensor_wave_functions import montecarlo_logloss_overlap_time_evoluted, sparse_tensor_exp_energy, calculate_sparse_overlap, quimb_vec_to_sparse
 import sonnet as snt
 from compgraph.useful import copy_to_non_trainable  # Importing custom functions and model class
-
+from compgraph.monte_carlo import parallel_monte_carlo_update, sequential_monte_carlo_update
 
 def inner_training(model_var, model_fix_for_te, graph_batch_var,graph_batch_te, optimizer, beta,sublattice, graph):
 
@@ -28,6 +28,12 @@ def inner_training(model_var, model_fix_for_te, graph_batch_var,graph_batch_te, 
     
     return output, loss
 
+def rolling_window_batch(graph_tuples, start, batch_size):
+    end = start + batch_size
+    if end <= len(graph_tuples):
+        return graph_tuples[start:end]
+    else:
+        return graph_tuples[start:] + graph_tuples[:end - len(graph_tuples)]
 
 
 
@@ -106,4 +112,40 @@ def outer_training(outer_steps, inner_steps, sublattice_encoding, graph, batch_s
     endtime = time.time() - start_time  # Calculate total training time
 
     # Return collected metrics and time
+    return endtime, energies, loss_vectors, overlap_in_time
+def outer_training_mc(outer_steps, inner_steps, sublattice_encoding, graph, batch_size,
+                   lowest_eigenstate_as_sparse, beta, initial_learning_rate, model_w, model_fix, graph_tuples_var, graph_tuples_te):
+    start_time = time.time()
+    optimizer_snt = tf.keras.optimizers.Adam(initial_learning_rate)
+
+    energies = []
+    loss_vectors = []
+    overlap_in_time = []
+    start = 0
+
+    for step in range(outer_steps):
+        copy_to_non_trainable(model_w, model_fix)
+
+        graph_tuples_var_batch = rolling_window_batch(graph_tuples_var, start, batch_size)
+        graph_tuples_te_batch = rolling_window_batch(graph_tuples_te, start, batch_size)
+        
+        # Monte Carlo update for the batches using multiprocessing
+        graph_tuples_var_batch = parallel_monte_carlo_update(graph_tuples_var_batch, model_w, N_sweeps=1, approach='var')
+        graph_tuples_te_batch = parallel_monte_carlo_update(graph_tuples_te_batch, model_fix, N_sweeps=1, approach='te', beta=beta, graph=graph, sublattice_encoding=sublattice_encoding)
+
+        for innerstep in range(inner_steps):
+            outputs, loss = inner_training(model_w, model_fix, graph_tuples_var_batch, graph_tuples_te_batch, optimizer_snt, beta, sublattice_encoding, graph)
+
+            normaliz_gnn = 1 / tf.norm(outputs.values)
+            norm_low_state_gnn = tf.sparse.map_values(tf.multiply, outputs, normaliz_gnn)
+            current_energy = sparse_tensor_exp_energy(outputs, graph, 0)
+            overlap_temp = tf.norm(calculate_sparse_overlap(lowest_eigenstate_as_sparse, norm_low_state_gnn))
+
+            overlap_in_time.append(overlap_temp.numpy())
+            energies.append(current_energy)
+            loss_vectors.append(loss.numpy())
+
+        start = (start + batch_size) % len(graph_tuples_var)
+
+    endtime = time.time() - start_time
     return endtime, energies, loss_vectors, overlap_in_time

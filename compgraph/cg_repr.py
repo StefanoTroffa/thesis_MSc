@@ -123,7 +123,7 @@ def square_2dham_exp(psi, graph, phi, J2, configs_psi, configs_phi):
 
     print("end of square 2d function")
     return expectation_value
-def config_hamiltonian_product(config, graph):
+def config_hamiltonian_product(config, graph, J2=0):
     configs=[]
     amplitudes=[]
     diagonal_contribution=0.
@@ -145,7 +145,11 @@ def config_hamiltonian_product(config, graph):
     if diagonal_contribution!=0:
         configs.append(config)
         amplitudes.append(multiplier*diagonal_contribution) 
-    
+        # Add next nearest neighbour interactions
+    # for i in graph.nodes:
+    #     for j in graph.neighbors(i):
+    #         for k in graph.neighbors(j):
+    #             Hamiltonian += J2 * term
     return np.array(configs), amplitudes
 
 def graph_tuple_to_config_hamiltonian_product(graph_tuple, graph, sublattice_encoding):

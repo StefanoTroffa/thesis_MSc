@@ -81,7 +81,6 @@ def create_sparsetensor_from_configs_amplitudes(configurations, amplitudes, num_
 
 
 
-#TODO deprecated, eliminate this function and substitute all recurrences with v2
 
 def time_evoluted_config_amplitude(model, beta, graph_tuple, graph, sublattice_encoding):
     graph_tuples_nonzero, amplitudes_gt=graph_tuple_to_config_hamiltonian_product(graph_tuple, graph, sublattice_encoding)
@@ -94,8 +93,7 @@ def time_evoluted_config_amplitude(model, beta, graph_tuple, graph, sublattice_e
         final_amplitude.append(complex_coefficient)
     beta= -1.*beta
     total_amplitude = tf.multiply(beta,tf.reduce_sum(tf.stack(final_amplitude)))
-    amplitude, phase = model(graph_tuple)[0]
-    complex_coefficient=tf.complex(real=amplitude, imag=phase)
+    complex_coefficient=evaluate_model(model, graph_tuple)
 
     total_amplitude = tf.add(complex_coefficient, total_amplitude)
     return total_amplitude
@@ -112,7 +110,8 @@ def time_evoluted_wave_function_on_batch(model_te, beta, graph_batch,graph, subl
         row_index = sparse_not.indices[0]
         # Check if the index is already in the dictionary
         if row_index in unique_data:
-            pass  
+            unique_data[row_index] += time_evoluted_config_amplitude(model_te, beta, graph_tuple, graph, sublattice_encoding)
+            #pass # previously there was no row above, and then we'd just ignore the repeated index. This however, does not reward the MC method  
         else:
             complex_coefficient=time_evoluted_config_amplitude(model_te, beta, graph_tuple, graph, sublattice_encoding)
 
@@ -132,6 +131,11 @@ def time_evoluted_wave_function_on_batch(model_te, beta, graph_batch,graph, subl
  
     
     return tf.sparse.reorder(sparse_tensor)
+
+def evaluate_model(model, graph_tuple):
+    amplitude, phase = model(graph_tuple)[0]
+    return tf.complex(real=amplitude, imag=phase) 
+
 def variational_wave_function_on_batch(model, graph_batch):
     unique_data = {}  # Dictionary to store unique indices and their corresponding values
     size=2**len(graph_batch[0].nodes)
@@ -143,14 +147,10 @@ def variational_wave_function_on_batch(model, graph_batch):
         sparse_not= sites_to_sparse([config])[0][0]
         row_index = sparse_not.indices[0]        # Check if the index is already in the dictionary
         if row_index in unique_data:
+            unique_data[row_index] += evaluate_model(model, graph_tuple) 
             pass  # Sum up the values for repeated indices
         else:
-            amplitude, phase = model(graph_tuple)[0]
-            # Convert amplitude to complex tensor with zero imaginary part
-            complex_coefficient=tf.complex(real=amplitude, imag=phase)
-
-        
-            unique_data[row_index] = complex_coefficient  # Add new index and value to the dictionary
+            unique_data[row_index] = evaluate_model(model, graph_tuple)
     
     # Convert dictionary to lists
     values = list(unique_data.values())

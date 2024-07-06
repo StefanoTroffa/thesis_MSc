@@ -86,7 +86,7 @@ class PoolingLayer_double(snt.Module):
         pooled_features = tf.concat([pooled_nodes, pooled_edges], axis=0)
         transformed = self.linear(tf.expand_dims(pooled_features, axis=0))
         transformed_globals = self.global_transform(0.05 * inputs.globals)
-        out = tf.nn.elu(transformed + transformed_globals)
+        out = tf.nn.relu(transformed + transformed_globals)
         return out
 
 # Define a comprehensive GNN model
