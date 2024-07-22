@@ -1,7 +1,11 @@
 from compgraph.useful import node_to_index, create_graph_tuples
 import numpy as np
 import networkx as nx
-
+from compgraph.useful import generate_graph_tuples_configs
+# import line_profiler
+# import atexit
+# profile2 = line_profiler.LineProfiler()
+# atexit.register(profile2.print_stats)
 
 def apply_raising_operator(config, site):
     """
@@ -151,7 +155,6 @@ def config_hamiltonian_product(config, graph, J2=0):
     #         for k in graph.neighbors(j):
     #             Hamiltonian += J2 * term
     return np.array(configs), amplitudes
-
 def graph_tuple_to_config_hamiltonian_product(graph_tuple, graph, sublattice_encoding):
     """
     This function is an helper function to eventually compute the amplitudes of the time 
@@ -170,6 +173,23 @@ def graph_tuple_to_config_hamiltonian_product(graph_tuple, graph, sublattice_enc
     
     return graph_tuples_generated, amplitudes
 
+def graph_tuple_to_config_hamiltonian_product_update(graph_tuple, graph, sublattice_encoding):
+    """
+    This function is an helper function to eventually compute the amplitudes of the time 
+    evoluted wave function.
+    config-> The configuration we want to project on given as a np.array or list of +-1s,
+    representing either spin up or down
+    graph-> is a networkx graph with edges and nodes, we are only interested in the edges
+    """
+    graph = nx.relabel_nodes(graph, node_to_index(graph))
+    #First function, the other one is built on this subroutine, that works also for just configurations
+    config= graph_tuple.nodes[:, 0].numpy()
+    configs, amplitudes= config_hamiltonian_product(config, graph)
+    #print('final configs from function nonzero amp', configs)        
+    
+    graph_tuples_generated=generate_graph_tuples_configs(graph_tuple, configs, sublattice_encoding) 
+    
+    return graph_tuples_generated, amplitudes
 
 #TODO add the diagonal contribution here, and copy the structure as for config_hamiltonian_product
 def configs_nonzeroamplitude_nnn(graph_tuple, graph, sublattice_encoding):

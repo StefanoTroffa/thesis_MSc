@@ -90,8 +90,9 @@ class PoolingLayer_double(snt.Module):
         return out
 
 # Define a comprehensive GNN model
+# @tf.function
 class GNN_double_output_advanced(snt.Module):
-    def __init__(self,hidden_layer_size, output_emb_size, num_layers=3):
+    def __init__(self,hidden_layer_size, output_emb_size, num_layers=tf.constant(3)):
         super(GNN_double_output_advanced, self).__init__()
         self.encoder = Encoder(hidden_layer_size, output_emb_size)
         self.processor = ProcessorLayer( hidden_layer_size, output_emb_size)
@@ -105,15 +106,14 @@ class GNN_double_output_advanced(snt.Module):
         decoded = self.decoder(proc)
         output = self.pooling_layer(decoded)
         return output
-
     
 class GNN_double_output(snt.Module):
-    def __init__(self,hidden_layer_size, output_emb_size):
+    def __init__(self,hidden_layer_size=tf.constant(128), output_emb_size=tf.constant(64)):
         super(GNN_double_output, self).__init__()
         self.encoder = Encoder(hidden_layer_size=hidden_layer_size,output_emb_size=output_emb_size)
 
         self.pooling_layer = PoolingLayer_double()
-
+    @tf.function(reduce_retracing=True)
     def __call__(self, inputs):
         encoded = self.encoder(inputs)
 

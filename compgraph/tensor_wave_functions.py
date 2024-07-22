@@ -5,64 +5,16 @@ import numpy as np
 from compgraph.cg_repr import graph_tuple_to_config_hamiltonian_product, square_2dham_exp, config_hamiltonian_product 
 from compgraph.useful import graph_tuple_toconfig, sparse_list_to_configs
 from compgraph.useful import sites_to_sparse
+# import line_profiler
+# import atexit
+# profile2 = line_profiler.LineProfiler()
+# atexit.register(profile2.print_stats)
 
 def convert_csr_to_sparse_tensor(csr_matrix):
     coo = coo_matrix(csr_matrix)
     indices = np.mat([coo.row, coo.col]).transpose()
     return tf.SparseTensor(indices, coo.data.astype(np.complex128), coo.shape)
 
-def adjust_dtype_and_multiply(a: tf.SparseTensor, b: tf.SparseTensor):
-    # Convert both SparseTensors to CSR sparse matrix with the desired type
-    a_sm = sparse_csr_matrix_ops.sparse_tensor_to_csr_sparse_matrix(
-        a.indices, tf.cast(a.values, tf.complex128), a.dense_shape)
-    
-    b_sm = sparse_csr_matrix_ops.sparse_tensor_to_csr_sparse_matrix(
-        b.indices, tf.cast(b.values, tf.complex128), b.dense_shape)
-
-    # Perform sparse matrix multiplication
-    c_sm = sparse_csr_matrix_ops.sparse_matrix_sparse_mat_mul(
-        a_sm, b_sm, type=tf.complex128)
-
-    # Convert the result back to a SparseTensor
-    c = sparse_csr_matrix_ops.csr_sparse_matrix_to_sparse_tensor(
-        c_sm, tf.complex128)
-
-    return tf.SparseTensor(indices=c.indices, values=c.values, dense_shape=c.dense_shape)
-def compute_loss_tensor(psi_sparse, phi_sparse):
-    # Compute the conjugate of the sparse tensor values
-    psi_sparse_conj = tf.SparseTensor(
-        indices=psi_sparse.indices,
-        values=tf.math.conj(psi_sparse.values),
-        dense_shape=psi_sparse.dense_shape
-    )
-    
-    phi_sparse_conj = tf.SparseTensor(
-        indices=phi_sparse.indices,
-        values=tf.math.conj(phi_sparse.values),
-        dense_shape=phi_sparse.dense_shape
-    )
-    
-    # Reorder the indices of the conjugate sparse tensor
-    psi_sparse_conj = tf.sparse.reorder(psi_sparse_conj)
-    
-    # Convert psi_sparse_conj to dense
-    psi_dense_conj = tf.sparse.to_dense(psi_sparse_conj)
-    phi_dense_conj= tf.sparse.to_dense(phi_sparse_conj)
-    
-    # Compute the norms using sparse-dense matrix multiplication
-    
-    psi_norm = tf.sparse.sparse_dense_matmul(psi_sparse, psi_dense_conj, adjoint_b=False)
-    phi_norm = tf.sparse.sparse_dense_matmul(phi_sparse, phi_dense_conj, adjoint_b=False)
-    print("norms:", psi_norm, phi_norm)
-    norm = psi_norm * phi_norm
-    
-    # Compute the numerator using dense-sparse matrix multiplication
-    numerator = tf.sparse.sparse_dense_matmul(psi_sparse, phi_dense_conj, adjoint_b=True)
-    print(psi_sparse, phi_sparse)
-    print("numerator", numerator, "Norm" ,"\n", norm)
-    loss = 1-numerator/tf.math.sqrt(norm)
-    
-    return loss
 def create_sparsetensor_from_configs_amplitudes(configurations, amplitudes, num_sites):
     """
     configurations is supposed to be a nd.array where the first axis iterates through different configurations
@@ -81,7 +33,7 @@ def create_sparsetensor_from_configs_amplitudes(configurations, amplitudes, num_
 
 
 
-
+# @profile2
 def time_evoluted_config_amplitude(model, beta, graph_tuple, graph, sublattice_encoding):
     graph_tuples_nonzero, amplitudes_gt=graph_tuple_to_config_hamiltonian_product(graph_tuple, graph, sublattice_encoding)
     final_amplitude=[]
@@ -98,6 +50,7 @@ def time_evoluted_config_amplitude(model, beta, graph_tuple, graph, sublattice_e
     total_amplitude = tf.add(complex_coefficient, total_amplitude)
     return total_amplitude
 
+# @profile2
 def time_evoluted_wave_function_on_batch(model_te, beta, graph_batch,graph, sublattice_encoding):
     unique_data = {}  # Dictionary to store unique indices and their corresponding values
     size=2**len(graph_batch[0].nodes)

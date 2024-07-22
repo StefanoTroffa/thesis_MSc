@@ -6,7 +6,11 @@ from compgraph.tensor_wave_functions import variational_wave_function_on_batch, 
 from compgraph.tensor_wave_functions import montecarlo_logloss_overlap_time_evoluted, sparse_tensor_exp_energy, calculate_sparse_overlap, quimb_vec_to_sparse
 import sonnet as snt
 from compgraph.useful import copy_to_non_trainable  # Importing custom functions and model class
-from compgraph.monte_carlo import parallel_monte_carlo_update, sequential_monte_carlo_update
+from compgraph.monte_carlo import parallel_monte_carlo_update, sequential_monte_carlo_update, MCMCSampler
+# import line_profiler
+# import atexit
+# profile0 = line_profiler.LineProfiler()
+# atexit.register(profile0.print_stats)
 
 def inner_training(model_var, model_fix_for_te, graph_batch_var,graph_batch_te, optimizer, beta,sublattice, graph):
 
@@ -37,7 +41,7 @@ def rolling_window_batch(graph_tuples, start, batch_size):
 
 
 
-def outer_training(outer_steps, inner_steps, sublattice_encoding, graph, batch_size,
+def outer_training(outer_steps, inner_steps, sublattice_encoding, graph,
                    lowest_eigenstate_as_sparse, beta, initial_learning_rate, model_w, model_fix, graph_tuples_var, graph_tuples_te):
     """
     Conducts the outer training loop for a variational quantum simulation, adjusting model weights
@@ -48,12 +52,11 @@ def outer_training(outer_steps, inner_steps, sublattice_encoding, graph, batch_s
         inner_steps (int): Number of inner training steps within each outer step, focusing on refining model parameters.
         sublattice_encoding (numpy.array): Encodes the sublattice configuration, crucial for defining interactions within the lattice.
         graph (networkx.Graph): The graph representing the lattice structure of the system under study.
-        batch_size (int): Number of graph states processed in each training batch.
         lowest_eigenstate_as_sparse (tf.Tensor): The target state tensor, representing the system's expected lowest energy state in sparse format.
         beta (float): Learning rate modifier or inverse temperature parameter used in certain quantum simulation algorithms.
         initial_learning_rate (float): Initial learning rate for the optimizer.
-        model_w (tf.keras.Model): The variational model being optimized, writable and updated during training.
-        model_fix (tf.keras.Model): A fixed reference model used for certain calculations, not updated during training.
+        model_w: The variational model being optimized, writable and updated during training.
+        model_fix: A fixed reference model used for certain calculations, not updated during training.
         graph_tuples_var (list): List of graph tuple configurations for the variational model.
         graph_tuples_te (list): List of graph tuple configurations for the fixed model.
 
@@ -106,46 +109,86 @@ def outer_training(outer_steps, inner_steps, sublattice_encoding, graph, batch_s
             energies.append(current_energy)
             loss_vectors.append(loss.numpy())
 
-        # Prepare for the next batch of data
-        start += batch_size
-
     endtime = time.time() - start_time  # Calculate total training time
 
     # Return collected metrics and time
     return endtime, energies, loss_vectors, overlap_in_time
-def outer_training_mc(outer_steps, inner_steps, sublattice_encoding, graph, batch_size,
-                   lowest_eigenstate_as_sparse, beta, initial_learning_rate, model_w, model_fix, graph_tuples_var, graph_tuples_te):
-    start_time = time.time()
-    optimizer_snt = tf.keras.optimizers.Adam(initial_learning_rate)
 
+# def outer_training_mc(outer_steps, inner_steps, sublattice_encoding, graph, lowest_eigenstate_as_sparse, beta, initial_learning_rate, model_w, model_fix, graph_tuples_var, graph_tuples_te):
+#     start_time = time.time()
+#     optimizer_snt = snt.optimizers.Adam(initial_learning_rate) 
+#     energies = []
+#     loss_vectors = []
+#     overlap_in_time = []
+#     start = 0
+#     # Initialize models with the first set of graph tuples to set dimensions and weights
+#     initialize_model_w = model_w(graph_tuples_var[0])
+#     initialize_model_fix = model_fix(graph_tuples_te[0])
+#     for step in range(outer_steps):
+#         copy_to_non_trainable(model_w, model_fix)
+        
+#         graph_tuples_te = sequential_monte_carlo_update(graph_tuples_te, model_fix, N_sweeps=5, approach='te', beta=beta, graph=graph, sublattice_encoding=sublattice_encoding)
+#         temp_energy=0.
+#         temp_overlap=0.
+#         graph_tuples_var= sequential_monte_carlo_update(graph_tuples_var, model_w, N_sweeps=4, approach='var')
+
+
+#         for innerstep in range(inner_steps):
+
+#             outputs, loss = inner_training(model_w, model_fix, graph_tuples_var, graph_tuples_te, optimizer_snt, beta, sublattice_encoding, graph)
+
+#             normaliz_gnn = 1 / tf.norm(outputs.values)
+#             norm_low_state_gnn = tf.sparse.map_values(tf.multiply, outputs, normaliz_gnn)
+#             current_energy = sparse_tensor_exp_energy(outputs, graph, 0)
+#             overlap_temp = tf.norm(calculate_sparse_overlap(lowest_eigenstate_as_sparse, norm_low_state_gnn))
+
+#             overlap_in_time.append(overlap_temp.numpy())
+#             energies.append(current_energy)
+#             loss_vectors.append(loss.numpy())
+#             graph_tuples_var= sequential_monte_carlo_update(graph_tuples_var, model_w, N_sweeps=4, approach='var')
+
+
+#     endtime = time.time() - start_time
+#     return endtime, energies, loss_vectors, overlap_in_time
+# @profile0
+def outer_training_mc(outer_steps, inner_steps, sublattice_encoding, graph,
+                      lowest_eigenstate_as_sparse, beta, initial_learning_rate, model_w, model_fix, graph_tuples_var, graph_tuples_te):
+    start_time = time.time()
+    optimizer_snt = snt.optimizers.Adam(initial_learning_rate)
     energies = []
     loss_vectors = []
     overlap_in_time = []
     start = 0
+    #TODO Sonnet wants the model to be initialized..., tbh this can be moved to MCMC sampler 
+    initialize_model_w = model_w(graph_tuples_var[0])
+    initialize_model_fix = model_fix(graph_tuples_te[0])
+    # Initialize samplers
+    sampler_var = MCMCSampler(model_w, graph_tuples_var[0])
+    sampler_te = MCMCSampler(model_fix, graph_tuples_te[0], beta, graph, sublattice_encoding)
 
     for step in range(outer_steps):
         copy_to_non_trainable(model_w, model_fix)
 
-        graph_tuples_var_batch = rolling_window_batch(graph_tuples_var, start, batch_size)
-        graph_tuples_te_batch = rolling_window_batch(graph_tuples_te, start, batch_size)
+        sampler_te.update_model(model_fix)
+        graph_tuples_te = [sampler_te.monte_carlo_update(9, 'te') for _ in graph_tuples_te]
         
-        # Monte Carlo update for the batches using multiprocessing
-        graph_tuples_var_batch = parallel_monte_carlo_update(graph_tuples_var_batch, model_w, N_sweeps=1, approach='var')
-        graph_tuples_te_batch = parallel_monte_carlo_update(graph_tuples_te_batch, model_fix, N_sweeps=1, approach='te', beta=beta, graph=graph, sublattice_encoding=sublattice_encoding)
+        # sampler_var.update_model(model_w)
+        graph_tuples_var = [sampler_var.monte_carlo_update(9, 'var') for _ in graph_tuples_var]
 
         for innerstep in range(inner_steps):
-            outputs, loss = inner_training(model_w, model_fix, graph_tuples_var_batch, graph_tuples_te_batch, optimizer_snt, beta, sublattice_encoding, graph)
+            outputs, loss = inner_training(model_w, model_fix, graph_tuples_var, graph_tuples_te, optimizer_snt, beta, sublattice_encoding, graph)
 
             normaliz_gnn = 1 / tf.norm(outputs.values)
             norm_low_state_gnn = tf.sparse.map_values(tf.multiply, outputs, normaliz_gnn)
             current_energy = sparse_tensor_exp_energy(outputs, graph, 0)
-            overlap_temp = tf.norm(calculate_sparse_overlap(lowest_eigenstate_as_sparse, norm_low_state_gnn))
 
-            overlap_in_time.append(overlap_temp.numpy())
             energies.append(current_energy)
             loss_vectors.append(loss.numpy())
 
-        start = (start + batch_size) % len(graph_tuples_var)
+            sampler_var.update_model(model_w)
+            graph_tuples_var = [sampler_var.monte_carlo_update(9, 'var') for _ in graph_tuples_var]
+        overlap_temp = tf.norm(calculate_sparse_overlap(lowest_eigenstate_as_sparse, norm_low_state_gnn))
 
+        overlap_in_time.append(overlap_temp.numpy())
     endtime = time.time() - start_time
     return endtime, energies, loss_vectors, overlap_in_time

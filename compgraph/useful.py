@@ -1,12 +1,14 @@
 from scipy.sparse import csr_matrix
-import sonnet as snt
-import tensorflow as tf
 import numpy as np
 from graph_nets import utils_np, utils_tf
 import quimb as qu
 import networkx as nx
 import tensorflow as tf
 import sonnet as snt
+# import line_profiler
+# import atexit
+# profile3 = line_profiler.LineProfiler()
+# atexit.register(profile3.print_stats)
 def node_to_index(graph):
     nodes_idx = {node: i for i, node in enumerate(graph.nodes)}
     return nodes_idx
@@ -41,7 +43,6 @@ def list_layers(module, prefix=''):
             list_layers(attr, prefix=prefix + '  ')
     return
 
-
 def create_graph_tuples(configs, graph,sublattice_encoding, global_par=0.05, edge_par=0.5):
     node_features = np.concatenate([configs[:, :, np.newaxis], np.repeat(sublattice_encoding[np.newaxis, :, :], len(configs), axis=0)], axis=2)
     # Get the edge indices
@@ -63,6 +64,17 @@ def create_graph_tuples(configs, graph,sublattice_encoding, global_par=0.05, edg
         graph_tuples.append(utils_tf.data_dicts_to_graphs_tuple([graph_dict]))
 
 
+    return graph_tuples
+
+def update_graph_tuple_config(graph_tuple, config, sublattice_encoding):
+    new_node_features = np.concatenate([config[:, np.newaxis], sublattice_encoding], axis=1)
+    
+    graph_tuple = graph_tuple.replace(nodes=tf.convert_to_tensor(new_node_features, dtype=tf.float64))
+    return graph_tuple
+def generate_graph_tuples_configs(graph_tuple, configs, sublattice):
+    graph_tuples=[]
+    for config in configs:
+        graph_tuples.append(update_graph_tuple_config(graph_tuple, config, sublattice))
     return graph_tuples
 
 def compare_graph_tuples(graph_tuples1, graph_tuples2):
