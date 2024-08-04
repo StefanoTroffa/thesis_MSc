@@ -155,7 +155,7 @@ def config_hamiltonian_product(config, graph, J2=0):
     #         for k in graph.neighbors(j):
     #             Hamiltonian += J2 * term
     return np.array(configs), amplitudes
-def graph_tuple_to_config_hamiltonian_product(graph_tuple, graph, sublattice_encoding):
+def graph_tuple_to_config_hamiltonian_product_old(graph_tuple, graph, sublattice_encoding):
     """
     This function is an helper function to eventually compute the amplitudes of the time 
     evoluted wave function.

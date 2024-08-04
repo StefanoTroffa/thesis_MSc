@@ -116,7 +116,7 @@ def config_to_state(config):
     return qu.kron(*psi_list)
 
 def state_from_config_amplitudes(configurations, amplitudes):
-        # Convert configurations to states and compute expected energy using Hamiltonian
+        # Convert configurations to states and compute the final state as superposition
         states = config_list_to_state_list(configurations)
         scaled_states = [amp * state for amp, state in zip(amplitudes, states)]
         superposition_state = sum(scaled_states)  # Superposition of all states

@@ -2,9 +2,8 @@ import tensorflow as tf
 from tensorflow.python.ops.linalg.sparse import sparse_csr_matrix_ops
 from scipy.sparse import coo_matrix
 import numpy as np
-from compgraph.cg_repr import graph_tuple_to_config_hamiltonian_product, square_2dham_exp, config_hamiltonian_product 
-from compgraph.useful import graph_tuple_toconfig, sparse_list_to_configs
-from compgraph.useful import sites_to_sparse
+from compgraph.cg_repr import graph_tuple_to_config_hamiltonian_product_update, square_2dham_exp, config_hamiltonian_product 
+from compgraph.useful import graph_tuple_toconfig, sparse_list_to_configs, graph_tuple_list_to_configs_list, sites_to_sparse
 # import line_profiler
 # import atexit
 # profile2 = line_profiler.LineProfiler()
@@ -18,11 +17,11 @@ def convert_csr_to_sparse_tensor(csr_matrix):
 def create_sparsetensor_from_configs_amplitudes(configurations, amplitudes, num_sites):
     """
     configurations is supposed to be a nd.array where the first axis iterates through different configurations
-    amplitudes is as well an nd.array with complex entries 
+    amplitudes is as well an nd.array with complex entries where
     configurations[0] corresponds to amplitudes[0]
     """
     # Create sparse vector using TensorFlow
-    sparse_indices = sites_to_sparse(configurations)[0] # Get indices from your sites_to_sparse function
+    sparse_indices = sites_to_sparse(configurations)[0] 
     indices = [[idx.indices[0], 0] for idx in sparse_indices]  # Format indices for tf.sparseTensor
 
     values_tensor = tf.stack(amplitudes, axis=0)
@@ -30,12 +29,16 @@ def create_sparsetensor_from_configs_amplitudes(configurations, amplitudes, num_
     sparse_tensor = tf.sparse.SparseTensor(indices=indices_tensor, values=values_tensor, dense_shape=[2**num_sites, 1])
     return tf.sparse.reorder(sparse_tensor)
 
-
+def create_sparse_tensor_from_graph_tuples_amplitudes(graph_tuples, amplitudes):
+    n_sites=len(graph_tuples[0].nodes)
+    configurations= graph_tuple_list_to_configs_list(graph_tuples)
+    sparse_tensor=create_sparsetensor_from_configs_amplitudes(configurations, amplitudes, n_sites)
+    return tf.sparse.reorder(sparse_tensor)
 
 
 # @profile2
 def time_evoluted_config_amplitude(model, beta, graph_tuple, graph, sublattice_encoding):
-    graph_tuples_nonzero, amplitudes_gt=graph_tuple_to_config_hamiltonian_product(graph_tuple, graph, sublattice_encoding)
+    graph_tuples_nonzero, amplitudes_gt=graph_tuple_to_config_hamiltonian_product_update(graph_tuple, graph, sublattice_encoding)
     final_amplitude=[]
     for i, gt in enumerate(graph_tuples_nonzero):
         amplitude, phase = model(gt)[0]
@@ -51,6 +54,12 @@ def time_evoluted_config_amplitude(model, beta, graph_tuple, graph, sublattice_e
     return total_amplitude
 
 # @profile2
+def graph_tuple_to_row_index(graph_tuple):
+    config=graph_tuple_toconfig(graph_tuple)
+    sparse_not= sites_to_sparse([config])[0][0]
+    row_index = sparse_not.indices[0]
+    return row_index
+
 def time_evoluted_wave_function_on_batch(model_te, beta, graph_batch,graph, sublattice_encoding):
     unique_data = {}  # Dictionary to store unique indices and their corresponding values
     size=2**len(graph_batch[0].nodes)
@@ -58,13 +67,12 @@ def time_evoluted_wave_function_on_batch(model_te, beta, graph_batch,graph, subl
     for graph_tuple in graph_batch:
         #print(graph_batch_indices, type(graph_batch_indices))
         # Extract the row index from the configuration
-        config=graph_tuple_toconfig(graph_tuple)
-        sparse_not= sites_to_sparse([config])[0][0]
-        row_index = sparse_not.indices[0]
+        row_index= graph_tuple_to_row_index(graph_tuple)
         # Check if the index is already in the dictionary
         if row_index in unique_data:
-            unique_data[row_index] += time_evoluted_config_amplitude(model_te, beta, graph_tuple, graph, sublattice_encoding)
-            #pass # previously there was no row above, and then we'd just ignore the repeated index. This however, does not reward the MC method  
+            #unique_data[row_index] += time_evoluted_config_amplitude(model_te, beta, graph_tuple, graph, sublattice_encoding)
+            
+            pass # previously there was no row above, and then we'd just ignore the repeated index. This however, does not reward the MC method  
         else:
             complex_coefficient=time_evoluted_config_amplitude(model_te, beta, graph_tuple, graph, sublattice_encoding)
 
@@ -96,11 +104,10 @@ def variational_wave_function_on_batch(model, graph_batch):
     for graph_tuple in graph_batch:
         #print(graph_batch_indices, type(graph_batch_indices))
         # Extract the row index from the configuration
-        config=graph_tuple_toconfig(graph_tuple)
-        sparse_not= sites_to_sparse([config])[0][0]
-        row_index = sparse_not.indices[0]        # Check if the index is already in the dictionary
+        row_index = graph_tuple_to_row_index(graph_tuple)
+        # Check if the index is already in the dictionary
         if row_index in unique_data:
-            unique_data[row_index] += evaluate_model(model, graph_tuple) 
+            #unique_data[row_index] += evaluate_model(model, graph_tuple) 
             pass  # Sum up the values for repeated indices
         else:
             unique_data[row_index] = evaluate_model(model, graph_tuple)
@@ -191,7 +198,7 @@ def montecarlo_logloss_overlap_time_evoluted(coefficients_te_on_te, graph_tuples
 
     overlap=tf.math.sqrt(overlap_over_te_distribution*overlap_over_var_distribution*normalization)
     #print("Overlap according to MC function", overlap_over_te_distribution*overlap_over_var_distribution*normalization)
-    return -tf.math.log(overlap)
+    return -overlap #-tf.math.log(1e-5+overlap)
 
 
 def quimb_vec_to_sparse(vector, configurations, num_sites):
