@@ -4,6 +4,7 @@ from compgraph.cg_repr import *
 import quimb as qu
 import networkx as nx
 from compgraph.useful import config_to_state, node_to_index, graph_tuple_list_to_configs_list, config_list_to_state_list, neel_state, state_from_config_amplitudes
+from compgraph.cg_repr import graph_tuple_to_config_hamiltonian_product_update
 from compgraph.tensor_wave_functions import sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes
 import itertools
 import tensorflow as tf
@@ -79,7 +80,7 @@ class TestCgRepr(unittest.TestCase):
             mat_vec= Hamiltonian @ psi
 
             site=create_graph_tuples(config, G, sub_lattice_encoding)
-            configurations_tuples, coefficients = graph_tuple_to_config_hamiltonian_product(site[0], G, sub_lattice_encoding)
+            configurations_tuples, coefficients = graph_tuple_to_config_hamiltonian_product_update(site[0], G, sub_lattice_encoding)
             configurations_list= graph_tuple_list_to_configs_list(configurations_tuples)
             states=(config_list_to_state_list(configurations_list))
             scaled_states = [coeff * state for coeff, state in zip(coefficients, states)]
@@ -96,8 +97,6 @@ class TestCgRepr(unittest.TestCase):
         generated1=config_to_state(config)
         self.assertTrue(np.allclose(generated1,qu.down()&qu.up()&qu.down()))
     
-    
-
     
     def test_sparse_tensor_exp_energy(self):
         n, m = 2, 2
@@ -132,8 +131,6 @@ class TestCgRepr(unittest.TestCase):
     #TODO Check that time_evoluted function is doing what it should do (similar syntax as test config_ham, but this time
     #we need to check that it has indeed the form (1- bH)|psi>; against configurations on lattice 2x2 and 3x3
     #Build a model as a test function that takes a graph_tuple and gives back a complex coefficient for each different graph_tuple configuration
-    
-
     def test_config_hamiltonian_product(self):
         n= 2
         m=2
@@ -158,7 +155,7 @@ class TestCgRepr(unittest.TestCase):
             mat_vec= Hamiltonian @ psi
 
             site=create_graph_tuples(config, G, sub_lattice_encoding)
-            configurations_tuples, coefficients = graph_tuple_to_config_hamiltonian_product(site[0], G, sub_lattice_encoding)
+            configurations_tuples, coefficients = graph_tuple_to_config_hamiltonian_product_update(site[0], G, sub_lattice_encoding)
             configurations_list= graph_tuple_list_to_configs_list(configurations_tuples)
             states=(config_list_to_state_list(configurations_list))
             scaled_states = [coeff * state for coeff, state in zip(coefficients, states)]

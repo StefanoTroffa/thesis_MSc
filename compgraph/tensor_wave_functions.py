@@ -3,12 +3,11 @@ from tensorflow.python.ops.linalg.sparse import sparse_csr_matrix_ops
 from scipy.sparse import coo_matrix
 import numpy as np
 from compgraph.cg_repr import graph_tuple_to_config_hamiltonian_product_update, square_2dham_exp, config_hamiltonian_product 
-from compgraph.useful import graph_tuple_toconfig, sparse_list_to_configs, graph_tuple_list_to_configs_list, sites_to_sparse
+from compgraph.useful import graph_tuple_toconfig, sparse_list_to_configs, graph_tuple_list_to_configs_list, sites_to_sparse, sites_to_sparse_updated
 # import line_profiler
 # import atexit
 # profile2 = line_profiler.LineProfiler()
 # atexit.register(profile2.print_stats)
-
 def convert_csr_to_sparse_tensor(csr_matrix):
     coo = coo_matrix(csr_matrix)
     indices = np.mat([coo.row, coo.col]).transpose()
@@ -21,8 +20,9 @@ def create_sparsetensor_from_configs_amplitudes(configurations, amplitudes, num_
     configurations[0] corresponds to amplitudes[0]
     """
     # Create sparse vector using TensorFlow
-    sparse_indices = sites_to_sparse(configurations)[0] 
-    indices = [[idx.indices[0], 0] for idx in sparse_indices]  # Format indices for tf.sparseTensor
+    # sparse_indices = sites_to_sparse(configurations)[0] 
+    # indices = [[idx.indices[0], 0] for idx in sparse_indices]  # Format indices for tf.sparseTensor
+    indices = [[idx, 0] for idx in sites_to_sparse_updated(configurations)]  # Format indices for tf.sparseTensor
 
     values_tensor = tf.stack(amplitudes, axis=0)
     indices_tensor = tf.constant(indices, dtype=tf.int64)
@@ -37,13 +37,13 @@ def create_sparse_tensor_from_graph_tuples_amplitudes(graph_tuples, amplitudes):
 
 
 # @profile2
-def time_evoluted_config_amplitude(model, beta, graph_tuple, graph, sublattice_encoding):
-    graph_tuples_nonzero, amplitudes_gt=graph_tuple_to_config_hamiltonian_product_update(graph_tuple, graph, sublattice_encoding)
+def time_evoluted_config_amplitude(model, beta, graph_tuple, graph):
+    graph_tuples_nonzero, amplitudes_gt=graph_tuple_to_config_hamiltonian_product_update(graph_tuple, graph)
     final_amplitude=[]
     for i, gt in enumerate(graph_tuples_nonzero):
         amplitude, phase = model(gt)[0]
         amplitude *= amplitudes_gt[i]
-        complex_coefficient=tf.complex(real=amplitude, imag=phase)
+        complex_coefficient= tf.complex(real=amplitude* tf.cos(phase), imag=amplitude * tf.sin(phase))
 
         final_amplitude.append(complex_coefficient)
     beta= -1.*beta
@@ -56,11 +56,13 @@ def time_evoluted_config_amplitude(model, beta, graph_tuple, graph, sublattice_e
 # @profile2
 def graph_tuple_to_row_index(graph_tuple):
     config=graph_tuple_toconfig(graph_tuple)
-    sparse_not= sites_to_sparse([config])[0][0]
-    row_index = sparse_not.indices[0]
-    return row_index
+    sparse_not= sites_to_sparse_updated([config])[0]
+    # sparse_not= sites_to_sparse([config])[0][0]
 
-def time_evoluted_wave_function_on_batch(model_te, beta, graph_batch,graph, sublattice_encoding):
+    # row_index = sparse_not.indices[0]
+    return sparse_not
+
+def time_evoluted_wave_function_on_batch(model_te, beta, graph_batch,graph):
     unique_data = {}  # Dictionary to store unique indices and their corresponding values
     size=2**len(graph_batch[0].nodes)
     # Compute the wave function components for each graph tuple
@@ -74,7 +76,7 @@ def time_evoluted_wave_function_on_batch(model_te, beta, graph_batch,graph, subl
             
             pass # previously there was no row above, and then we'd just ignore the repeated index. This however, does not reward the MC method  
         else:
-            complex_coefficient=time_evoluted_config_amplitude(model_te, beta, graph_tuple, graph, sublattice_encoding)
+            complex_coefficient=time_evoluted_config_amplitude(model_te, beta, graph_tuple, graph)
 
         
             unique_data[row_index] = complex_coefficient  # Add new index and value to the dictionary
@@ -95,7 +97,7 @@ def time_evoluted_wave_function_on_batch(model_te, beta, graph_batch,graph, subl
 
 def evaluate_model(model, graph_tuple):
     amplitude, phase = model(graph_tuple)[0]
-    return tf.complex(real=amplitude, imag=phase) 
+    return  tf.complex(real=amplitude* tf.cos(phase), imag=amplitude * tf.sin(phase)) 
 
 def variational_wave_function_on_batch(model, graph_batch):
     unique_data = {}  # Dictionary to store unique indices and their corresponding values
@@ -150,8 +152,6 @@ def sparse_tensor_exp_energy(wave_function, graph, J2):
         
     return exp_value*normalization_factor**2
 
-    
-
 def calculate_sparse_overlap(left_part, right_part):
     """
     Calculate the overlap using sparse tensors for coefficients.
@@ -170,11 +170,11 @@ def calculate_sparse_overlap(left_part, right_part):
     product_sparse = tf.sparse.map_values(tf.multiply, conjugated_te, right_part)
 
     # Sum all the elements to get the expectation value
-    expectation_value = tf.sparse.reduce_sum(product_sparse)
+    overlap = tf.sparse.reduce_sum(product_sparse)
 
-    return expectation_value
+    return overlap
 
-def montecarlo_logloss_overlap_time_evoluted(coefficients_te_on_te, graph_tuples_te, model_var, model_te, graph_tuples_var,beta, graph_hamiltonian, sublattice):
+def montecarlo_logloss_overlap_time_evoluted(coefficients_te_on_te, graph_tuples_te, model_var, model_te, graph_tuples_var,beta, graph_hamiltonian):
     
     """
     
@@ -189,7 +189,7 @@ def montecarlo_logloss_overlap_time_evoluted(coefficients_te_on_te, graph_tuples
     overlap_over_var_distribution=0.
     coefficients_var_on_var=variational_wave_function_on_batch(model_var,graph_tuples_var)
     coefficients_var_on_te=variational_wave_function_on_batch(model_var, graph_tuples_te)    
-    coefficients_te_on_var=time_evoluted_wave_function_on_batch(model_te,beta, graph_tuples_var, graph_hamiltonian, sublattice)
+    coefficients_te_on_var=time_evoluted_wave_function_on_batch(model_te,beta, graph_tuples_var, graph_hamiltonian)
     overlap_over_te_distribution=calculate_sparse_overlap(coefficients_te_on_te, coefficients_var_on_te)
     overlap_over_var_distribution=calculate_sparse_overlap(coefficients_var_on_var, coefficients_te_on_var)
     norm_wave = tf.norm(coefficients_var_on_var.values)
@@ -198,7 +198,7 @@ def montecarlo_logloss_overlap_time_evoluted(coefficients_te_on_te, graph_tuples
 
     overlap=tf.math.sqrt(overlap_over_te_distribution*overlap_over_var_distribution*normalization)
     #print("Overlap according to MC function", overlap_over_te_distribution*overlap_over_var_distribution*normalization)
-    return -overlap #-tf.math.log(1e-5+overlap)
+    return -tf.math.log(overlap)
 
 
 def quimb_vec_to_sparse(vector, configurations, num_sites):

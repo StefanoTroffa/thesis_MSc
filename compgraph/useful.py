@@ -43,7 +43,12 @@ def list_layers(module, prefix=''):
             list_layers(attr, prefix=prefix + '  ')
     return
 
-def create_graph_tuples(configs, graph,sublattice_encoding, global_par=0.05, edge_par=0.5):
+def create_graph_tuples(configs:list, graph:nx.graph,sublattice_encoding:np.array, global_par:float=0.05, edge_par:float=0.5):
+    """
+    
+    Given a list of configurations the graph as a nx object, the sublattice_encoding, and some global and edge parameters  
+    
+    """
     node_features = np.concatenate([configs[:, :, np.newaxis], np.repeat(sublattice_encoding[np.newaxis, :, :], len(configs), axis=0)], axis=2)
     # Get the edge indices
     edge_index = np.array(graph.edges()).T
@@ -71,12 +76,34 @@ def update_graph_tuple_config(graph_tuple, config, sublattice_encoding):
     
     graph_tuple = graph_tuple.replace(nodes=tf.convert_to_tensor(new_node_features, dtype=tf.float64))
     return graph_tuple
-def generate_graph_tuples_configs(graph_tuple, configs, sublattice):
+def generate_graph_tuples_configs(graph_tuple, configs):
     graph_tuples=[]
     for config in configs:
-        graph_tuples.append(update_graph_tuple_config(graph_tuple, config, sublattice))
+        graph_tuples.append(update_graph_tuple_config_new(graph_tuple, config))
     return graph_tuples
 
+# def generate_graph_tuples_configs(graph_tuple, configs, sublattice):
+#     graph_tuples=[]
+#     for config in configs:
+#         graph_tuples.append(update_graph_tuple_config_new(graph_tuple, config, sublattice))
+#     return graph_tuples
+def update_graph_tuple_config_new(graph_tuple, config):
+    # Extract the existing node features from the graph_tuple
+    existing_node_features = graph_tuple.nodes.numpy()
+
+    # Update only the first column (configuration) of the node features, leaving the rest (sublattice encoding) unchanged
+    new_node_features = existing_node_features.copy()
+    new_node_features[:, 0] = config  # Update only the configuration part
+
+    # Replace the graph_tuple's node features with the updated features
+    graph_tuple = graph_tuple.replace(nodes=tf.convert_to_tensor(new_node_features, dtype=tf.float64))
+    
+    return graph_tuple
+def generate_graph_tuples_configs_new(graph_tuple, configs):
+    graph_tuples=[]
+    for config in configs:
+        graph_tuples.append(update_graph_tuple_config_new(graph_tuple, config))
+    return graph_tuples
 def compare_graph_tuples(graph_tuples1, graph_tuples2):
     if len(graph_tuples1) != len(graph_tuples2):
         return False
@@ -115,7 +142,11 @@ def config_to_state(config):
         psi_list.append(psi_temp)
     return qu.kron(*psi_list)
 
-def state_from_config_amplitudes(configurations, amplitudes):
+def state_from_config_amplitudes(configurations:list, amplitudes:list):
+        """
+        Takes as input a list of configurations e.g. [1,-1,1,1] 
+        and a list of amplitudes and returns a quimb state
+        """
         # Convert configurations to states and compute the final state as superposition
         states = config_list_to_state_list(configurations)
         scaled_states = [amp * state for amp, state in zip(amplitudes, states)]
@@ -129,7 +160,7 @@ def neel_state(graph):
     sublattice_encoding[1::2, 1] = 1  # Sublattice 2 
     return sublattice_encoding
 
-def create_2d_square_graph(lattice_size):
+def create_2d_square_graph(lattice_size:tuple):
     G = nx.grid_2d_graph(*lattice_size, periodic=True)
     G = nx.relabel_nodes(G, node_to_index(G))
     return G
@@ -178,6 +209,16 @@ def sites_to_sparse(base_config):
         configurations_in_sparse_notation.append(one_hot_vector)
     return configurations_in_sparse_notation, values
 
+def sites_to_sparse_updated(configs):
+    values=[]
+    for configuration in configs:
+        value=0
+        for j in range(len(configuration)):
+            b= int((-1*(configuration[j]-1))*2**(len(configuration)-j-2))
+            value+=b
+
+        values.append(2**(len(configuration))-1-value) 
+    return values  
 def compare_sonnet_modules(snt1, snt2):
     # Ensure both modules have the same number of variables
     if len(snt1.variables) == len(snt2.variables):
@@ -201,5 +242,39 @@ def copy_to_non_trainable(module_a, module_b):
     
     for var in module_b.variables:
         var._trainable = False 
-    return
+    # return module_b
 
+def compute_freq_and_amplitudes_from_configurations(configurations, amplitudes):
+    """
+    configurations is supposed to be a nd.array where the first axis iterates through different configurations
+    amplitudes is as well an nd.array with complex entries where
+    configurations[0] corresponds to amplitudes[0]
+    """
+    unique_data = {}  
+    unique_data_frequencies={}
+    N_samples=len(configurations)
+    num_sites=configurations[0].shape[0]
+    # Create sparse vector using TensorFlow
+    sparse_indices = sites_to_sparse_updated(configurations)
+    for idx, sparse_idx in enumerate(sparse_indices):
+        if sparse_idx in unique_data:
+            unique_data_frequencies[sparse_idx]+=1
+            pass
+        else:
+            unique_data_frequencies[sparse_idx]=1
+            unique_data[sparse_idx]=amplitudes[idx]
+    values = list(unique_data.values())
+
+    indices = [[key,0] for key in unique_data.keys()]  # Format indices for tf.sparseTensor
+    indices_tensor = tf.constant(indices, dtype=tf.int64)
+    
+    values_tensor = tf.stack(values, axis=0)
+    value_frequencies=tf.stack(list(unique_data_frequencies.values()), axis=0)
+    sparse_tensor = tf.sparse.SparseTensor(indices=indices_tensor, values=values_tensor, dense_shape=[2**num_sites, 1])
+    sparse_tensor_frequency=tf.sparse.SparseTensor(indices=indices_tensor, values=value_frequencies, dense_shape=[2**num_sites, 1])
+    return tf.sparse.reorder(sparse_tensor), tf.sparse.reorder(sparse_tensor_frequency)
+def create_amplitude_frequencies_from_graph_tuples(graph_tuples, amplitudes):
+        
+    configurations= graph_tuple_list_to_configs_list(graph_tuples)
+    sparse_tensor, freq_amplitudes=compute_freq_and_amplitudes_from_configurations(configurations, amplitudes)
+    return tf.sparse.reorder(sparse_tensor), tf.sparse.reorder(freq_amplitudes)

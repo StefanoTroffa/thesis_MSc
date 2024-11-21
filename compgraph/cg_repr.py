@@ -173,7 +173,7 @@ def graph_tuple_to_config_hamiltonian_product_old(graph_tuple, graph, sublattice
     
     return graph_tuples_generated, amplitudes
 
-def graph_tuple_to_config_hamiltonian_product_update(graph_tuple, graph, sublattice_encoding):
+def graph_tuple_to_config_hamiltonian_product_update(graph_tuple, graph):
     """
     This function is an helper function to eventually compute the amplitudes of the time 
     evoluted wave function.
@@ -187,7 +187,7 @@ def graph_tuple_to_config_hamiltonian_product_update(graph_tuple, graph, sublatt
     configs, amplitudes= config_hamiltonian_product(config, graph)
     #print('final configs from function nonzero amp', configs)        
     
-    graph_tuples_generated=generate_graph_tuples_configs(graph_tuple, configs, sublattice_encoding) 
+    graph_tuples_generated=generate_graph_tuples_configs(graph_tuple, configs) 
     
     return graph_tuples_generated, amplitudes
 
