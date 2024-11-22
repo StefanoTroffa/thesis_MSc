@@ -114,7 +114,7 @@ def outer_training(outer_steps, inner_steps, sublattice_encoding, graph,
     # Return collected metrics and time
     return endtime, energies, loss_vectors, overlap_in_time
 
-def outer_training_mc(outer_steps, inner_steps, sublattice_encoding, graph,
+def outer_training_mc(outer_steps, inner_steps, graph,
                       lowest_eigenstate_as_sparse, beta, initial_learning_rate, model_w, model_fix, graph_tuples_var, graph_tuples_te):
     start_time = time.time()
     optimizer_snt = snt.optimizers.Adam(initial_learning_rate)
@@ -127,7 +127,7 @@ def outer_training_mc(outer_steps, inner_steps, sublattice_encoding, graph,
     initialize_model_fix = model_fix(graph_tuples_te[0])
     # Initialize samplers
     sampler_var = MCMCSampler(model_w, graph_tuples_var[0])
-    sampler_te = MCMCSampler(model_fix, graph_tuples_te[0], beta, graph, sublattice_encoding)
+    sampler_te = MCMCSampler(model_fix, graph_tuples_te[0], beta, graph)
 
     for step in range(outer_steps):
         copy_to_non_trainable(model_w, model_fix)
@@ -139,7 +139,7 @@ def outer_training_mc(outer_steps, inner_steps, sublattice_encoding, graph,
         graph_tuples_var = [sampler_var.monte_carlo_update(9, 'var') for _ in graph_tuples_var]
 
         for innerstep in range(inner_steps):
-            outputs, loss = inner_training(model_w, model_fix, graph_tuples_var, graph_tuples_te, optimizer_snt, beta, sublattice_encoding, graph)
+            outputs, loss = inner_training(model_w, model_fix, graph_tuples_var, graph_tuples_te, optimizer_snt, beta, graph)
 
             normaliz_gnn = 1 / tf.norm(outputs.values)
             norm_low_state_gnn = tf.sparse.map_values(tf.multiply, outputs, normaliz_gnn)

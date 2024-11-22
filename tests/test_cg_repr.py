@@ -155,7 +155,7 @@ class TestCgRepr(unittest.TestCase):
             mat_vec= Hamiltonian @ psi
 
             site=create_graph_tuples(config, G, sub_lattice_encoding)
-            configurations_tuples, coefficients = graph_tuple_to_config_hamiltonian_product_update(site[0], G, sub_lattice_encoding)
+            configurations_tuples, coefficients = graph_tuple_to_config_hamiltonian_product_update(site[0], G)
             configurations_list= graph_tuple_list_to_configs_list(configurations_tuples)
             states=(config_list_to_state_list(configurations_list))
             scaled_states = [coeff * state for coeff, state in zip(coefficients, states)]

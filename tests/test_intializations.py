@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 import quimb as qu
 import networkx as nx
-from compgraph.gnn_src_code import GNN_double_output, GNN_double_output_advanced
+from compgraph.models import GNN_double_output, GNN_double_output_advanced
 from compgraph.tensor_wave_functions import variational_wave_function_on_batch, sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes, time_evoluted_wave_function_on_batch, montecarlo_logloss_overlap_time_evoluted, calculate_sparse_overlap, quimb_vec_to_sparse
 import tensorflow as tf
 from simulation.initializer import initialize_NQS_model_fromhyperparams

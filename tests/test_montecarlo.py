@@ -5,13 +5,27 @@ import networkx as nx
 import tensorflow as tf
 from compgraph.cg_repr import *
 from compgraph.useful import create_graph_tuples, node_to_index, neel_state, state_from_config_amplitudes, config_to_state
-from compgraph.gnn_src_code import GNN_double_output
+from compgraph.models import GNN_double_output
 from compgraph.tensor_wave_functions import variational_wave_function_on_batch, sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes, time_evoluted_wave_function_on_batch, montecarlo_logloss_overlap_time_evoluted, calculate_sparse_overlap, quimb_vec_to_sparse
 from compgraph.tensor_wave_functions import variational_wave_function_on_batch, sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes, time_evoluted_wave_function_on_batch, montecarlo_logloss_overlap_time_evoluted, calculate_sparse_overlap, quimb_vec_to_sparse
 from simulation.initializer import create_graph_from_ham
 import itertools
 from compgraph.monte_carlo import MCMCSampler
-
+from compgraph.models import GNN_double_output
+from compgraph.monte_carlo import MCMCSampler, stochastic_energy
+from compgraph.useful import (
+    create_graph_tuples,
+    config_to_state,
+    state_from_config_amplitudes,
+    create_amplitude_frequencies_from_graph_tuples,
+    generate_graph_tuples_configs,
+    sparse_list_to_configs,
+)
+from simulation.initializer import (
+    create_graph_from_ham,
+    initialize_NQS_model_fromhyperparams,
+    initialize_graph_tuples,
+)
     
 class TestMonteCarlofunctions(unittest.TestCase):
 
@@ -51,10 +65,10 @@ class TestMonteCarlofunctions(unittest.TestCase):
 
             # Calculate coefficients
             sparse_coefficients_var = variational_wave_function_on_batch(model_var, graph_tuples_var)
-            sparse_coefficients_te = time_evoluted_wave_function_on_batch(model_te, beta, graph_tuples_te, G, sublattice_enc)
+            sparse_coefficients_te = time_evoluted_wave_function_on_batch(model_te, beta, graph_tuples_te, G)
 
             # Calculate the monte carlo log loss overlap
-            computed_logloss = montecarlo_logloss_overlap_time_evoluted(sparse_coefficients_te, graph_tuples_te, model_var, model_te, graph_tuples_var, beta, G, sublattice_enc)
+            computed_logloss = montecarlo_logloss_overlap_time_evoluted(sparse_coefficients_te, graph_tuples_te, model_var, model_te, graph_tuples_var, beta, G)
             #print(computed_logloss)
 
             amplitudes =np.array(sparse_coefficients_var.values)
@@ -104,11 +118,11 @@ class TestMonteCarlofunctions(unittest.TestCase):
 
         # Calculate coefficients
         sparse_coefficients_var = variational_wave_function_on_batch(model_var, graph_tuples_var)
-        sparse_coefficients_te = time_evoluted_wave_function_on_batch(model_te, beta, graph_tuples_te, G, sublattice_enc)
+        sparse_coefficients_te = time_evoluted_wave_function_on_batch(model_te, beta, graph_tuples_te, G)
 
         # Calculate the monte carlo log loss overlap
         with tf.GradientTape() as tape:
-            computed_logloss = montecarlo_logloss_overlap_time_evoluted(sparse_coefficients_te, graph_tuples_te, model_var, model_te, graph_tuples_var, beta, G, sublattice_enc)
+            computed_logloss = montecarlo_logloss_overlap_time_evoluted(sparse_coefficients_te, graph_tuples_te, model_var, model_te, graph_tuples_var, beta, G)
         # Compute gradients with respect to the model's trainable variables
         analytical_gradients = tape.gradient(computed_logloss, model_var.trainable_variables)
 
@@ -131,13 +145,13 @@ class TestMonteCarlofunctions(unittest.TestCase):
                 var.assign(var_plus)
                 loss_plus = montecarlo_logloss_overlap_time_evoluted(
                     sparse_coefficients_te,
-                    graph_tuples_te, model_var, model_var, graph_tuples_var, beta, G, sublattice_enc
+                    graph_tuples_te, model_var, model_var, graph_tuples_var, beta, G
                 )
 
                 var.assign(var_minus)
                 loss_minus = montecarlo_logloss_overlap_time_evoluted(
                     sparse_coefficients_te,
-                    graph_tuples_te, model_var, model_te, graph_tuples_var, beta, G, sublattice_enc
+                    graph_tuples_te, model_var, model_te, graph_tuples_var, beta, G
                 )
 
                 # Compute finite difference gradient
@@ -218,7 +232,7 @@ class TestMonteCarlofunctions(unittest.TestCase):
             print(psi, sparse_tensor.values,amplitudes)
             self.assertTrue(np.allclose(sparse_tensor.values,sparse_from_qu.values))
     #def test_proposed_tuples(self):
-    def test_mcmc_sampler(self):
+    def test_ite_in_mcmc_sampler(self):
         """
         Test the MCMC Sampler for consistency in the wavefunction calculation of time evolution.
         """
@@ -254,7 +268,7 @@ class TestMonteCarlofunctions(unittest.TestCase):
         full_basis_gt = create_graph_tuples(full_basis_configs, graph, subl)
         model = GNN_double_output(128, 32)
         beta = 0.12
-        sampler_te = MCMCSampler(model, full_basis_gt[0], beta, graph, subl)
+        sampler_te = MCMCSampler(model, full_basis_gt[0], beta, graph)
 
         wave_function_te_on_full = [sampler_te.evaluate_model(gt) for gt in full_basis_gt]
         amplitudes = np.array(wave_function_te_on_full)
@@ -274,6 +288,111 @@ class TestMonteCarlofunctions(unittest.TestCase):
             self.assertTrue(np.allclose(psi_te_quimb[index], total_amplitude),
                             f"Mismatch at index {index}: Computed {total_amplitude}, Expected {psi_te_quimb[index]}")
 
+class TestMCMCEnergyTrajectory(unittest.TestCase):
+    def setUp(self):
+        # Allow for easy personalization of the lattice size
+        self.lattice_size = (2, 2)  # Change this to your desired lattice size
+        # Create the graph and sublattice
+        self.graph, self.subl = create_graph_from_ham('2dsquare', self.lattice_size, 'Neel')
+        # Generate full basis configurations
+        n_nodes = len(self.graph.nodes)
+        self.full_basis_configs = (np.array([[int(x) for x in format(i, f'0{n_nodes}b')] for i in range(2**(n_nodes))]) * 2 - 1)
+        # Create graph tuples
+        self.full_basis_gt = create_graph_tuples(self.full_basis_configs, self.graph, self.subl)
+        # Initialize the model with given hyperparameters
+        hyperparams = {"hidden_size": 128, "output_emb_size": 64}
+        self.model = initialize_NQS_model_fromhyperparams('GNN2simple', hyperparams)
+        self.sampler = MCMCSampler(self.model, self.full_basis_gt[0])
+        self.wave_function_on_full = [self.sampler.evaluate_model(gt) for gt in self.full_basis_gt]
+        freq_as_exact_amplitudes = [np.abs(wf)**2 for wf in self.wave_function_on_full]
+        freq_as_exact_amplitudes /= np.sum(freq_as_exact_amplitudes)
+        self.exact_energy = stochastic_energy(self.sampler, self.graph, self.full_basis_gt, freq_as_exact_amplitudes)
+        amplitudes = np.array(self.wave_function_on_full)
+        self.psi_full = state_from_config_amplitudes(self.full_basis_configs, amplitudes)
+        self.Hamiltonian = qu.ham_heis_2D(
+            self.lattice_size[0], self.lattice_size[1], j=1.0, bz=0, cyclic=True, parallel=False
+        )
+        self.exact_quimb_energy = (self.psi_full.H @ self.Hamiltonian @ self.psi_full) / (self.psi_full.H @ self.psi_full)
+        # Initialize variables for energy trajectory
+        self.energy_trajectory = []
+
+    def test_energy_trajectory(self):
+            # Verify that exact energy and quimb energy are the same
+        self.assertTrue(
+                np.allclose(self.exact_energy[0], self.exact_quimb_energy),
+                f"Exact energy ({self.exact_energy}) and quimb energy ({self.exact_quimb_energy}) do not match.")  
+        # Initialize graph tuples for variance computations
+        num_samples = 8  # Number of MCMC samples
+        graph_tuples_v = initialize_graph_tuples(num_samples, self.graph, self.subl)
+        num_iterations = 200  # Number of iterations to perform
+        for _ in range(num_iterations):
+            n_sites = len(graph_tuples_v[0].nodes[:, 0])
+            # Perform MCMC updates
+            graph_tuples_v, coeff_var_on_var = zip(*[
+                self.sampler.monte_carlo_update(2, gt, 'var') for gt in graph_tuples_v
+            ])
+            # Create amplitude frequencies from graph tuples
+            _, freq_var = create_amplitude_frequencies_from_graph_tuples(graph_tuples_v, coeff_var_on_var)
+            # Generate unique graph tuples
+            unique_tuples_var = generate_graph_tuples_configs(
+                graph_tuples_v[0], sparse_list_to_configs(freq_var.indices[:, 0], n_sites)
+            )
+            freq_ampl = np.array(freq_var.values) / len(graph_tuples_v)
+            # Compute stochastic energy
+            stoch_energy = stochastic_energy(self.sampler, self.graph, unique_tuples_var, freq_ampl)
+            self.energy_trajectory.append(stoch_energy[0].numpy())
+        # Compute standard deviation series
+        offset = 0  # Starting point for standard deviation calculation
+        std_exact_series, std_mean_series = compute_energy_std_series(
+            self.energy_trajectory, self.exact_energy[0], offset
+        )
+        # Save the plot to a file
+        plot_file_path = 'energy_std_plot.png'  # You can customize the file path
+        plot_std_series(std_exact_series, std_mean_series, offset, plot_file_path)
+        # Assert that the standard deviation decreases over time
+        self.assertLess(
+            std_exact_series[-20], std_exact_series[2],
+            "Standard deviation did not decrease as expected."
+        )
+
+def compute_energy_std_series(energy_trajectory, exact_energy, offset=0):
+    """
+    Compute the standard deviation of the energy trajectory with respect to the exact energy
+    and the mean of the trajectory up to each point (starting after offset).
+    """
+    if len(energy_trajectory) <= offset:
+        raise ValueError("Not enough data points to compute statistics after offset.")
+    energy_trajectory = np.array(energy_trajectory)
+    std_exact_series = []
+    std_mean_series = []
+    for i in range(offset, len(energy_trajectory)):
+        current_trajectory = energy_trajectory[offset:i+1]
+        # Standard deviation with respect to exact energy
+        std_exact = np.sqrt(np.mean((current_trajectory - exact_energy)**2))
+        std_exact_series.append(std_exact)
+        # Rolling mean
+        mean_estimate = np.mean(current_trajectory)
+        # Standard deviation with respect to rolling mean
+        std_mean = np.std(current_trajectory - mean_estimate)
+        std_mean_series.append(std_mean)
+    return std_exact_series, std_mean_series
+
+def plot_std_series(std_exact_series, std_mean_series, offset, file_path):
+    import matplotlib.pyplot as plt
+    iterations = np.arange(offset, offset + len(std_exact_series))
+    plt.figure(figsize=(10, 6))
+    plt.loglog(iterations, std_exact_series, label='std_exact', color='b')
+    plt.loglog(iterations, std_mean_series, label='std_mean', color='r')
+    # Plot 1/sqrt(x) for reference
+    plt.loglog(iterations, std_exact_series[0] * (1 / iterations)**0.5, label='1/sqrt(x)', linestyle='--', color='g')
+    plt.xlabel('Iterations')
+    plt.ylabel('Standard Deviation')
+    plt.title('Standard Deviation vs Iterations (Log-Log Scale)')
+    plt.legend()
+    plt.grid(True)
+    # Save the plot to the specified file path
+    plt.savefig(file_path)
+    plt.close()
 
 
 if __name__ == '__main__':
