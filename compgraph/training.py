@@ -114,44 +114,106 @@ def outer_training(outer_steps, inner_steps, sublattice_encoding, graph,
     # Return collected metrics and time
     return endtime, energies, loss_vectors, overlap_in_time
 
+# def outer_training_mc(outer_steps, inner_steps, graph,
+#                       lowest_eigenstate_as_sparse, beta, initial_learning_rate, model_w, model_fix, graph_tuples_var, graph_tuples_te):
+#     start_time = time.time()
+#     optimizer_snt = snt.optimizers.Adam(initial_learning_rate)
+#     energies = []
+#     loss_vectors = []
+#     overlap_in_time = []
+#     start = 0
+#     #TODO Sonnet wants the model to be initialized..., tbh this can be moved to MCMC sampler 
+#     initialize_model_w = model_w(graph_tuples_var[0])
+#     initialize_model_fix = model_fix(graph_tuples_te[0])
+#     # Initialize samplers
+#     sampler_var = MCMCSampler(model_w, graph_tuples_var[0])
+#     sampler_te = MCMCSampler(model_fix, graph_tuples_te[0], beta, graph)
+
+#     for step in range(outer_steps):
+#         copy_to_non_trainable(model_w, model_fix)
+
+#         sampler_te.update_model(model_fix)
+#         graph_tuples_te = [sampler_te.monte_carlo_update(9,gt, 'te') for gt in graph_tuples_te]
+        
+#         # sampler_var.update_model(model_w)
+#         graph_tuples_var = [sampler_var.monte_carlo_update(9,gt, 'var') for gt in graph_tuples_var]
+
+#         for innerstep in range(inner_steps):
+#             outputs, loss = inner_training(model_w, model_fix, graph_tuples_var, graph_tuples_te, optimizer_snt, beta, graph)
+
+#             normaliz_gnn = 1 / tf.norm(outputs.values)
+#             norm_low_state_gnn = tf.sparse.map_values(tf.multiply, outputs, normaliz_gnn)
+#             current_energy = sparse_tensor_exp_energy(outputs, graph, 0)
+
+#             energies.append(current_energy)
+#             loss_vectors.append(loss.numpy())
+
+#             sampler_var.update_model(model_w)
+#             graph_tuples_var = [sampler_var.monte_carlo_update(9, 'var') for _ in graph_tuples_var]
+#         overlap_temp = tf.norm(calculate_sparse_overlap(lowest_eigenstate_as_sparse, norm_low_state_gnn))
+
+#         overlap_in_time.append(overlap_temp.numpy())
+#     endtime = time.time() - start_time
+#     return endtime, energies, loss_vectors, overlap_in_time
+from compgraph.tensor_wave_functions import variational_wave_function_on_batch, time_evoluted_wave_function_on_batch
+from compgraph.tensor_wave_functions import sparse_tensor_exp_energy, calculate_sparse_overlap, quimb_vec_to_sparse
+import sonnet as snt
+from compgraph.useful import copy_to_non_trainable,generate_graph_tuples_configs_new  # Importing custom functions and model class
+# from compgraph.monte_carlo import MCMCSampler
+from compgraph.training import inner_training
+import time
+import tensorflow as tf 
+from compgraph.useful import graph_tuple_list_to_configs_list, copy_to_non_trainable, compare_sonnet_modules, sites_to_sparse_updated, create_amplitude_frequencies_from_graph_tuples,sparse_list_to_configs
+import line_profiler
+from compgraph.monte_carlo import stochastic_gradients, stochastic_energy
+
 def outer_training_mc(outer_steps, inner_steps, graph,
-                      lowest_eigenstate_as_sparse, beta, initial_learning_rate, model_w, model_fix, graph_tuples_var, graph_tuples_te):
+                     beta, initial_learning_rate, model_w, model_fix, graph_tuples_var, graph_tuples_te,lowest_eigenstate_as_sparse=None):
+    N_sweeps=len(graph_tuples_var[0].nodes)//2
+    # N_sweeps=5
     start_time = time.time()
-    optimizer_snt = snt.optimizers.Adam(initial_learning_rate)
     energies = []
     loss_vectors = []
     overlap_in_time = []
-    start = 0
+    # SEED = 42
+    # np.random.seed(SEED)
+    # tf.random.set_seed(SEED)    
     #TODO Sonnet wants the model to be initialized..., tbh this can be moved to MCMC sampler 
     initialize_model_w = model_w(graph_tuples_var[0])
     initialize_model_fix = model_fix(graph_tuples_te[0])
     # Initialize samplers
     sampler_var = MCMCSampler(model_w, graph_tuples_var[0])
     sampler_te = MCMCSampler(model_fix, graph_tuples_te[0], beta, graph)
+    n_sites=len(graph_tuples_var[0].nodes[:,0])
+    optimizer = snt.optimizers.Adam(initial_learning_rate)
 
     for step in range(outer_steps):
-        copy_to_non_trainable(model_w, model_fix)
-
-        sampler_te.update_model(model_fix)
-        graph_tuples_te = [sampler_te.monte_carlo_update(9, 'te') for _ in graph_tuples_te]
-        
-        # sampler_var.update_model(model_w)
-        graph_tuples_var = [sampler_var.monte_carlo_update(9, 'var') for _ in graph_tuples_var]
+        are_identical = compare_sonnet_modules(sampler_var.model, sampler_te.model)
+        print("The models are identical before copying:", are_identical)
+        copy_to_non_trainable(sampler_var.model, sampler_te.model)
+        are_identical2 = compare_sonnet_modules(sampler_var.model, sampler_te.model)   
+        print("The models are identical after copying:", are_identical2)
+        # copy_to_non_trainable(model_w, model_fix)
 
         for innerstep in range(inner_steps):
-            outputs, loss = inner_training(model_w, model_fix, graph_tuples_var, graph_tuples_te, optimizer_snt, beta, graph)
+            # outputs, loss = inner_training(model_w, model_fix, graph_tuples_var, graph_tuples_te, optimizer_snt, beta, sublattice_encoding, graph)
+            graph_tuples_var, coeff_var_on_var = zip(*[sampler_var.monte_carlo_update(N_sweeps, graph_tuple,'var') for graph_tuple in graph_tuples_var])
+            # sampler_var.update_model(model_w)
+            configs_var=sites_to_sparse_updated(graph_tuple_list_to_configs_list(graph_tuples_var))
 
-            normaliz_gnn = 1 / tf.norm(outputs.values)
-            norm_low_state_gnn = tf.sparse.map_values(tf.multiply, outputs, normaliz_gnn)
-            current_energy = sparse_tensor_exp_energy(outputs, graph, 0)
+            print(f'configs var: {configs_var}')
+            # Temporarily modified in asking two times the graph_tuples var
+            wave_function_var_on_var, freq_var = create_amplitude_frequencies_from_graph_tuples(graph_tuples_var, coeff_var_on_var)
+            freq_ampl_var = np.array(freq_var.values) / len(graph_tuples_var)
+            unique_tuples_var = generate_graph_tuples_configs_new(graph_tuples_var[0], sparse_list_to_configs(freq_var.indices[:, 0], n_sites))
 
-            energies.append(current_energy)
-            loss_vectors.append(loss.numpy())
+            stoch_gradients=stochastic_gradients(sampler_var,sampler_te,unique_tuples_var,freq_ampl_var)
+            #print("check of new inner functions", outputs==outputs2, loss==loss2)
+            optimizer.apply(stoch_gradients, sampler_var.model.trainable_variables)            
+            stoch_energy=stochastic_energy(sampler_var,graph,unique_tuples_var,freq_ampl_var)
 
-            sampler_var.update_model(model_w)
-            graph_tuples_var = [sampler_var.monte_carlo_update(9, 'var') for _ in graph_tuples_var]
-        overlap_temp = tf.norm(calculate_sparse_overlap(lowest_eigenstate_as_sparse, norm_low_state_gnn))
+            energies.append(stoch_energy[0].numpy())
+            print('stoch energy',stoch_energy[0].numpy(), 'freq', freq_ampl_var)
 
-        overlap_in_time.append(overlap_temp.numpy())
     endtime = time.time() - start_time
     return endtime, energies, loss_vectors, overlap_in_time

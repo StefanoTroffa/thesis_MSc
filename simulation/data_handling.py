@@ -21,8 +21,8 @@ def parse_args():
     # Graph parameters
     graph_parser = parser.add_argument_group('graph_params')
     graph_parser.add_argument('--graphType', type=str, default='2dsquare')
-    graph_parser.add_argument('--n', type=int, default=3)
-    graph_parser.add_argument('--m', type=int, default=3)
+    graph_parser.add_argument('--n', type=int, default=2)
+    graph_parser.add_argument('--m', type=int, default=2)
     graph_parser.add_argument('--sublattice', type=str, default='Neel')
     
     # Simulation parameters
@@ -257,9 +257,9 @@ def run_simulation(hyperparams):
         graph_tuples_fix = initialize_graph_tuples(hyperparams['sim_params']['batch_size'],
             graph, subl)
         results=outer_training_mc(
-            hyperparams['sim_params']['outer_loop'], hyperparams['sim_params']['inner_loop'], graph, lowest_eigenstate_as_sparse,
-            hyperparams['sim_params']['beta'], hyperparams['sim_params']['learning_rate'],
-            model_w, model_fix, graph_tuples_var, graph_tuples_fix)
+            hyperparams['sim_params']['outer_loop'], hyperparams['sim_params']['inner_loop'], graph,hyperparams['sim_params']['beta'],
+             hyperparams['sim_params']['learning_rate'],
+            model_w, model_fix, graph_tuples_var, graph_tuples_fix, lowest_eigenstate_as_sparse)
         
     else:
         graph_tuples_var = initialize_graph_tuples(hyperparams['sim_params']['batch_size'],graph, subl,"yes")
