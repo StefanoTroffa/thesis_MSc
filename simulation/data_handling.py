@@ -28,7 +28,7 @@ def parse_args():
     # Simulation parameters
     sim_parser = parser.add_argument_group('sim_params')
     sim_parser.add_argument('--beta', type=float, default=0.07)
-    sim_parser.add_argument('--full_size_hilbert', type=str, default='yes',
+    sim_parser.add_argument('--full_size_hilbert', type=str, default='VMC',
                              help="Only for default simulation type")
     sim_parser.add_argument('--batch_size', type=int, default=32)
     sim_parser.add_argument('--learning_rate', type=float, default=7e-5)
