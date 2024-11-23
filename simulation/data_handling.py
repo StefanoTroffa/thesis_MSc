@@ -257,8 +257,7 @@ def run_simulation(hyperparams):
         graph_tuples_fix = initialize_graph_tuples(hyperparams['sim_params']['batch_size'],
             graph, subl)
         results=outer_training_mc(
-            hyperparams['sim_params']['outer_loop'], hyperparams['sim_params']['inner_loop'],
-            subl, graph, lowest_eigenstate_as_sparse,
+            hyperparams['sim_params']['outer_loop'], hyperparams['sim_params']['inner_loop'], graph, lowest_eigenstate_as_sparse,
             hyperparams['sim_params']['beta'], hyperparams['sim_params']['learning_rate'],
             model_w, model_fix, graph_tuples_var, graph_tuples_fix)
         

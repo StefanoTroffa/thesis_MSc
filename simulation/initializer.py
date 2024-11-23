@@ -1,5 +1,5 @@
 import sonnet as snt
-from compgraph.gnn_src_code import GNN_double_output, GNN_double_output_advanced
+from compgraph.models import GNN_double_output, GNN_double_output_advanced
 from compgraph.useful import create_2d_square_graph, neel_state, create_graph_tuples
 import time
 import numpy as np
@@ -36,7 +36,7 @@ def format_hyperparams_to_string(hyperparams):
     return '_'.join(parts)
 
 
-def initialize_NQS_model_fromhyperparams(ansatz, ansatz_params):
+def initialize_NQS_model_fromhyperparams(ansatz:str, ansatz_params:dict):
     """
     Initialize the model based on the provided ansatz and its parameters.
 
@@ -90,7 +90,7 @@ def apply_sublattice_encoding(graph, sublattice_type):
         raise ValueError(f"The specified sublattice type is not implemented. Available types are: {available_sublattices}")
 
 
-def create_graph_from_ham(geometric_structure, lattice_size, sublattice):
+def create_graph_from_ham(geometric_structure:str, lattice_size:tuple, sublattice:str):
     """
     Create a graph based on specified geometric structure.
 
