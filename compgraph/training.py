@@ -6,7 +6,7 @@ from compgraph.tensor_wave_functions import variational_wave_function_on_batch, 
 from compgraph.tensor_wave_functions import montecarlo_logloss_overlap_time_evoluted, sparse_tensor_exp_energy, calculate_sparse_overlap, quimb_vec_to_sparse
 import sonnet as snt
 from compgraph.useful import copy_to_non_trainable  # Importing custom functions and model class
-from compgraph.monte_carlo import parallel_monte_carlo_update, sequential_monte_carlo_update, MCMCSampler
+from compgraph.monte_carlo import MCMCSampler
 
 # import line_profiler
 # import atexit
