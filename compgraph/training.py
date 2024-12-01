@@ -137,6 +137,7 @@ def outer_training_mc(outer_steps, inner_steps, graph,
     energies = []
     loss_vectors = []
     overlap_in_time = []
+    magnetizations=[]
     # SEED = 42
     # np.random.seed(SEED)
     # tf.random.set_seed(SEED)    
@@ -150,7 +151,7 @@ def outer_training_mc(outer_steps, inner_steps, graph,
     optimizer = snt.optimizers.Adam(initial_learning_rate)
     if n_sites<17:
         fhs = np.array([[int(x) for x in format(i, f'0{n_sites}b')] for i in range(2**(n_sites))]) * 2 - 1
-
+        fh_gt=generate_graph_tuples_configs_new(graph_tuples_var[0],fhs)
     for step in range(outer_steps):
         are_identical = compare_sonnet_modules(sampler_var.model, sampler_te.model)
         print("The models are identical before copying:", are_identical)
@@ -178,12 +179,46 @@ def outer_training_mc(outer_steps, inner_steps, graph,
 
             energies.append(stoch_energy[0].numpy())
             print('stoch energy',stoch_energy[0].numpy(), 'freq', freq_ampl_var)
+            # **Compute the magnetization**
+            def graph_tuple_toconfig_tf(graph_tuple):
+                config= graph_tuple.nodes[:, 0]
+                return config
+
+            # Step 1: Convert all unique graph tuples to configurations
+            configs = [graph_tuple_toconfig_tf(sample) for sample in unique_tuples_var]
+            # configs is a list of tensors with shape (num_sites,)
+
+            # Step 2: Stack configurations into a tensor
+            configs_tensor = tf.stack(configs)  # Shape: (num_configs, num_sites)
+
+            # Step 3: Compute S_z(s) for all configurations
+            # Sum over spins for each configuration
+            Sz_s = tf.reduce_sum(configs_tensor, axis=1)  # Shape: (num_configs,)
+            # print(Sz_s)
+            # Step 4: Compute weighted average of S_z(s)
+            freq_ampl_var_tensor = tf.convert_to_tensor(freq_ampl_var, dtype=Sz_s.dtype)  # Shape: (num_configs,)
+
+            # Compute total_Sz using vectorized operations
+            total_Sz = tf.reduce_sum(Sz_s * freq_ampl_var_tensor)
+
+            # Compute total frequency (should be 1.0 if frequencies are normalized)
+            total_frequency = tf.reduce_sum(freq_ampl_var_tensor)
+
+            # Step 5: Compute average magnetization per site
+            N = tf.cast(tf.shape(configs_tensor)[1], Sz_s.dtype)
+            M_z = total_Sz / total_frequency
+            m_z = M_z / N  # per-site magnetization
+
+            magnetizations.append(m_z.numpy())
+
+
+
         if n_sites<17:
-            outputs = variational_wave_function_on_batch(sampler_var.model, fhs)
+            outputs = variational_wave_function_on_batch(sampler_var.model, fh_gt)
             normaliz_gnn = 1 / tf.norm(outputs.values)
             norm_low_state_gnn = tf.sparse.map_values(tf.multiply, outputs, normaliz_gnn)
             overlap_temp = tf.norm(calculate_sparse_overlap(lowest_eigenstate_as_sparse, norm_low_state_gnn))
 
         overlap_in_time.append(overlap_temp.numpy())
     endtime = time.time() - start_time
-    return endtime, energies, loss_vectors, overlap_in_time
+    return endtime, energies, loss_vectors, overlap_in_time, magnetizations

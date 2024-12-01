@@ -279,7 +279,8 @@ def run_simulation(hyperparams):
         "sim_time": results[0],
         "energies": results[1],  # Convert tensors to numpy if necessary
         "loss": results[2],
-        "overlap": results[3]
+        "overlap": results[3],
+        "magnetization":results[4]
     }
 
     # Flatten the hyperparameters and merge with results
