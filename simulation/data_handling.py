@@ -95,24 +95,27 @@ def create_directory_structure(hyperparams):
 
     Args:
         hyperparams (dict): Hyperparameters for the simulation.
-        simulation_type (str): Type of simulation ('default' or 'VMC').
 
     Returns:
         str: The base path of the created directory structure.
     """
+    # Generate the date string
+    date_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+
     ansatz_info = generate_info_string({'ansatz': hyperparams['ansatz'], 'ansatz_params': hyperparams['ansatz_params']})
     graph_info = f"{hyperparams['graph_params']['graphType']}_0{hyperparams['graph_params']['n']}_0{hyperparams['graph_params']['m']}_{hyperparams['graph_params']['sublattice']}"
     sim_params_info_parts = generate_info_string(hyperparams['sim_params'], get_short_keys()['sim_params']).split('_')
-    simulation_type=hyperparams['simulation_type']
+    simulation_type = hyperparams['simulation_type']
     if simulation_type == 'VMC':
         sim_params_info_parts.append('VMC')
     else:
         sim_params_info_parts.append('fsh')
-    
+
     sim_params_info = '_'.join(sim_params_info_parts)
 
-    base_path = os.path.join('simulation_results', 'system_Heisenberg', graph_info, sim_params_info, ansatz_info)
-    
+    # Include the date after 'system_Heisenberg'
+    base_path = os.path.join('simulation_results', f'system_Heisenberg_{date_str}', graph_info, sim_params_info, ansatz_info)
+
     os.makedirs(base_path, exist_ok=True)
 
     print(f"Results will be saved to {base_path}")
@@ -235,10 +238,10 @@ def run_simulation(hyperparams):
         hyperparams['graph_params']['sublattice']
     )
     logger.info(f"Graph and sublattice initialized: {graph}, {subl}")
-
-    # Generate the full basis configurations for the system
-    full_basis_configs = np.array([[int(x) for x in format(i, f'0{len(graph.nodes)}b')] for i in range(2**(len(graph.nodes)))]) * 2 - 1
-    lowest_eigenstate_as_sparse = initialize_hamiltonian_and_groundstate(hyperparams['graph_params'], full_basis_configs)
+    if hyperparams['graph_params']['n']*hyperparams['graph_params']['m']<17:
+        # Generate the full basis configurations for the system
+        full_basis_configs = np.array([[int(x) for x in format(i, f'0{len(graph.nodes)}b')] for i in range(2**(len(graph.nodes)))]) * 2 - 1
+        lowest_eigenstate_as_sparse = initialize_hamiltonian_and_groundstate(hyperparams['graph_params'], full_basis_configs)
 
     # Initialize the variational and fixed models
     model_w = initialize_NQS_model_fromhyperparams(hyperparams['ansatz'], hyperparams['ansatz_params'])
