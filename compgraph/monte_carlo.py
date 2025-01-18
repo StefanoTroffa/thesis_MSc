@@ -13,6 +13,8 @@ from compgraph.useful import generate_graph_tuples_configs, graph_tuple_toconfig
 # profile = line_profiler.LineProfiler()
 # atexit.register(profile.print_stats)
 #Todo make the 
+from memory_profiler import profile as mprofile
+
 def propose_graph_tuple(graph_tuple):
     """
     Propose a new graph tuple by flipping the spin of a randomly selected node.
@@ -23,6 +25,32 @@ def propose_graph_tuple(graph_tuple):
     i = np.random.randint(len(proposed_nodes))  # Choose a random node
     proposed_nodes[i, 0] *= -1  # Flip the spin at this node
     return graph_tuple.replace(nodes=tf.constant(proposed_nodes))
+
+# def propose_graph_tuple(graph_tuple):
+#     """
+#     Propose a new graph tuple by flipping the spin of a randomly selected node.
+#     Args: graph_tuple (tf.Tensor): The input graph tuple.
+#     Returns: tf.Tensor: The proposed graph tuple with the spin of one node flipped.
+#     """
+#     nodes = graph_tuple.nodes 
+#     # Randomly pick a node index i to flip
+#     i = tf.random.uniform(
+#         shape=[],               
+#         minval=0,
+#         maxval=tf.shape(nodes)[0],
+#         dtype=tf.int32
+#     )
+
+#     flipped_spin = -nodes[i, 0]
+
+#     updated_nodes = tf.tensor_scatter_nd_update(
+#         tensor=nodes,
+#         indices=[[i, 0]],       # the row/column to update
+#         updates=[flipped_spin]  # the new value
+#     )
+
+#     # Return a new graph tuple with the updated node spins
+#     return graph_tuple.replace(nodes=updated_nodes)
 
 class MCMCSampler:
     def __init__(self, model, current_tuple, beta=None, graph=None, initialized=False):
@@ -56,35 +84,91 @@ class MCMCSampler:
 
     # @profile
     # @tf.function
+    # def monte_carlo_update(self, N_sweeps, graph_tuple, approach):
+    #     self.tuple = graph_tuple
+    #     state=self.tuple
+    #     if approach == 'var':
+    #         psi = self.evaluate_model(state)
+
+    #         for _ in tf.range(N_sweeps):
+    #             proposed_graph_tuple = propose_graph_tuple(state)
+    #             psi_new = self.evaluate_model(proposed_graph_tuple)
+    #             p_accept = tf.minimum(tf.constant(1.0, dtype=tf.float64), tf.abs(psi_new / psi)**2)
+    #             if tf.random.uniform([], dtype=tf.float64) < p_accept:
+    #                 psi=psi_new
+
+    #                 state = proposed_graph_tuple
+    #     elif approach == 'te':
+    #         psi = self.time_evoluted_config_amplitude(state)
+
+    #         for _ in tf.range(N_sweeps):
+    #             proposed_graph_tuple = propose_graph_tuple(state)
+    #             psi_new = self.time_evoluted_config_amplitude(proposed_graph_tuple)
+    #             p_accept = tf.minimum(tf.constant(1.0, dtype=tf.float64), tf.abs(psi_new / psi)**2)
+
+    #             if tf.random.uniform([], dtype=tf.float64) < p_accept:
+    #                 psi=psi_new
+    #                 state = proposed_graph_tuple
+
+    #     self.tuple = state
+    #     return state, psi
+    # @tf.function
+    import tracemalloc
+
     def monte_carlo_update(self, N_sweeps, graph_tuple, approach):
-        self.tuple = graph_tuple
-        state=self.tuple
+        """
+        Debug version of monte_carlo_update with extra tracemalloc snapshots.
+        WARNING: This will print a lot of output if N_sweeps is large.
+        """
+        state = graph_tuple
+        
+        # Decide which method to call initially
+        snapshot_before_init = tracemalloc.take_snapshot()
         if approach == 'var':
             psi = self.evaluate_model(state)
-
-            for _ in tf.range(N_sweeps):
-                proposed_graph_tuple = propose_graph_tuple(state)
-                psi_new = self.evaluate_model(proposed_graph_tuple)
-                p_accept = tf.minimum(tf.constant(1.0, dtype=tf.float64), tf.abs(psi_new / psi)**2)
-                if tf.random.uniform([], dtype=tf.float64) < p_accept:
-                    psi=psi_new
-
-                    state = proposed_graph_tuple
-        elif approach == 'te':
+        else:
             psi = self.time_evoluted_config_amplitude(state)
+        snapshot_after_init = tracemalloc.take_snapshot()
+        top_stats_init = snapshot_after_init.compare_to(snapshot_before_init, 'traceback')
+        print("\n[TRACEMALLOC] After initial wavefunction eval:")
+        for i, stat in enumerate(top_stats_init[:3], 1):
+            print(f"  {i}. {stat}")
 
-            for _ in tf.range(N_sweeps):
-                proposed_graph_tuple = propose_graph_tuple(state)
+        # Main loop
+        for sweep_idx in range(N_sweeps):
+            # Snapshot before propose_graph_tuple
+            snapshot_before_propose = tracemalloc.take_snapshot()
+
+            proposed_graph_tuple = propose_graph_tuple(state)
+
+            snapshot_after_propose = tracemalloc.take_snapshot()
+            top_stats_propose = snapshot_after_propose.compare_to(snapshot_before_propose, 'traceback')
+            print(f"\n[TRACEMALLOC] After propose_graph_tuple (sweep {sweep_idx}):")
+            for i, stat in enumerate(top_stats_propose[:3], 1):
+                print(f"  {i}. {stat}")
+
+            # Evaluate wavefunction
+            snapshot_before_eval = tracemalloc.take_snapshot()
+            
+            if approach == 'var':
+                psi_new = self.evaluate_model(proposed_graph_tuple)
+            else:
                 psi_new = self.time_evoluted_config_amplitude(proposed_graph_tuple)
-                p_accept = tf.minimum(tf.constant(1.0, dtype=tf.float64), tf.abs(psi_new / psi)**2)
 
-                if tf.random.uniform([], dtype=tf.float64) < p_accept:
-                    psi=psi_new
-                    state = proposed_graph_tuple
+            snapshot_after_eval = tracemalloc.take_snapshot()
+            top_stats_eval = snapshot_after_eval.compare_to(snapshot_before_eval, 'traceback')
+            print(f"[TRACEMALLOC] After wavefunction eval (sweep {sweep_idx}):")
+            for i, stat in enumerate(top_stats_eval[:3], 1):
+                print(f"  {i}. {stat}")
 
-        self.tuple = state
+            # Accept/reject
+            p_accept = tf.minimum(tf.constant(1.0, dtype=tf.float64),
+                                tf.square(tf.abs(psi_new / psi)))
+            if tf.random.uniform([], dtype=tf.float64) < p_accept:
+                psi = psi_new
+                state = proposed_graph_tuple
+
         return state, psi
-
 
 def stochastic_energy(model_var:MCMCSampler, graph, graph_tuple_configs, frequencies=None, J2=None):
     energy=0.+0.j
@@ -197,6 +281,7 @@ def copy_and_perturb_weights(sampler_var, sampler_te, perturbation_scale=1e-4, s
             print('after',param)
                     
     return sampler_te
+
 def stochastic_gradients(sampler_var,sampler_te, unique_tuples_var,freq_ampl_var):
     with tf.GradientTape() as tape:
         tape.watch(sampler_var.model.trainable_variables)
@@ -212,3 +297,53 @@ def stochastic_gradients(sampler_var,sampler_te, unique_tuples_var,freq_ampl_var
         stoch_gradients=tape.gradient(tf.reduce_sum(stoch_estimation), sampler_var.model.trainable_variables)
         # print(stoch_gradients[0])
     return stoch_gradients    
+import tracemalloc
+def stochastic_gradients_malloc(sampler_var, sampler_te, unique_tuples_var, freq_ampl_var):
+    snapshot_before_tape = tracemalloc.take_snapshot()
+    
+    with tf.GradientTape() as tape:
+        tape.watch(sampler_var.model.trainable_variables)
+
+        # Snap before building psi_terms
+        snapshot_before_psi = tracemalloc.take_snapshot()
+        psi_terms = tf.stack([sampler_var.evaluate_model(gt) for gt in unique_tuples_var])
+        snapshot_after_psi = tracemalloc.take_snapshot()
+        top_stats_psi = snapshot_after_psi.compare_to(snapshot_before_psi, 'traceback')
+        print("\n[TRACEMALLOC] After building psi_terms:")
+        for i, stat in enumerate(top_stats_psi[:3], 1):
+            print(f"  {i}. {stat}")
+
+        # Snap before building phi_terms
+        snapshot_before_phi = tracemalloc.take_snapshot()
+        phi_terms = tf.stack([sampler_te.time_evoluted_config_amplitude(gt) for gt in unique_tuples_var])
+        snapshot_after_phi = tracemalloc.take_snapshot()
+        top_stats_phi = snapshot_after_phi.compare_to(snapshot_before_phi, 'traceback')
+        print("[TRACEMALLOC] After building phi_terms:")
+        for i, stat in enumerate(top_stats_phi[:3], 1):
+            print(f"  {i}. {stat}")
+
+        log_psi = tf.math.log(tf.math.conj(psi_terms))
+        ratio_phi_psi = tf.stop_gradient(phi_terms / psi_terms)
+
+        stoch_estimation = freq_ampl_var * log_psi \
+                           - ratio_phi_psi * log_psi * freq_ampl_var \
+                             / tf.reduce_sum(ratio_phi_psi * freq_ampl_var)
+
+        loss = tf.reduce_sum(stoch_estimation)
+
+    snapshot_before_grad = tracemalloc.take_snapshot()
+    stoch_gradients = tape.gradient(loss, sampler_var.model.trainable_variables)
+    snapshot_after_grad = tracemalloc.take_snapshot()
+
+    top_stats_grad = snapshot_after_grad.compare_to(snapshot_before_grad, 'traceback')
+    print("[TRACEMALLOC] After computing gradients:")
+    for i, stat in enumerate(top_stats_grad[:3], 1):
+        print(f"  {i}. {stat}")
+
+    snapshot_after_tape = tracemalloc.take_snapshot()
+    top_stats_tape = snapshot_after_tape.compare_to(snapshot_before_tape, 'traceback')
+    print("[TRACEMALLOC] End of stochastic_gradients (Tape scope):")
+    for i, stat in enumerate(top_stats_tape[:3], 1):
+        print(f"  {i}. {stat}")
+
+    return stoch_gradients

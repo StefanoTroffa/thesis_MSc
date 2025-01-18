@@ -261,7 +261,7 @@ class GNN_double_output(snt.Module):
         self.encoder = Encoder(hidden_layer_size=hidden_layer_size,output_emb_size=output_emb_size)
 
         self.pooling_layer = PoolingLayer_double()
-    @tf.function(reduce_retracing=True)
+    # @tf.function(reduce_retracing=True)
     def __call__(self, inputs):
         encoded = self.encoder(inputs)
 

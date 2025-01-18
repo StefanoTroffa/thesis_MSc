@@ -40,3 +40,5 @@ LastVersionNotebook.ipynb
 garbage_coll.py
 config.py
 slurm*
+
+*mprofile*

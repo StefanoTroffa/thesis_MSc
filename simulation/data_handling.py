@@ -32,7 +32,7 @@ def parse_args():
                              help="Only for default simulation type")
     sim_parser.add_argument('--batch_size', type=int, default=32)
     sim_parser.add_argument('--learning_rate', type=float, default=7e-5)
-    sim_parser.add_argument('--outer_loop', type=int, default=500)
+    sim_parser.add_argument('--outer_loop', type=int, default=10)
     sim_parser.add_argument('--inner_loop', type=int, default=5)    
     # Ansatz parameters
     ansatz_parser = parser.add_argument_group('ansatz_params')
@@ -250,9 +250,9 @@ def run_simulation(hyperparams):
 
 
     simulation_type=hyperparams['simulation_type']
-    SEED = 42
-    np.random.seed(SEED)
-    tf.random.set_seed(SEED)
+    # SEED = 42
+    # np.random.seed(SEED)
+    # tf.random.set_seed(SEED)
     if simulation_type == 'VMC':
         # Generate tuples of graphs for variational training and fixed comparisons
         graph_tuples_var = initialize_graph_tuples(hyperparams['sim_params']['batch_size'],
