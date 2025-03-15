@@ -82,11 +82,7 @@ def generate_graph_tuples_configs(graph_tuple, configs):
         graph_tuples.append(update_graph_tuple_config_new(graph_tuple, config))
     return graph_tuples
 
-# def generate_graph_tuples_configs(graph_tuple, configs, sublattice):
-#     graph_tuples=[]
-#     for config in configs:
-#         graph_tuples.append(update_graph_tuple_config_new(graph_tuple, config, sublattice))
-#     return graph_tuples
+
 def update_graph_tuple_config_new(graph_tuple, config):
     # Extract the existing node features from the graph_tuple
     existing_node_features = graph_tuple.nodes.numpy()
@@ -96,14 +92,40 @@ def update_graph_tuple_config_new(graph_tuple, config):
     new_node_features[:, 0] = config  # Update only the configuration part
 
     # Replace the graph_tuple's node features with the updated features
-    graph_tuple = graph_tuple.replace(nodes=tf.convert_to_tensor(new_node_features, dtype=tf.float64))
+    graph_tuple = graph_tuple.replace(nodes=tf.convert_to_tensor(new_node_features, dtype=tf.float32))
     
     return graph_tuple
-def generate_graph_tuples_configs_new(graph_tuple, configs):
+
+
+
+def update_graph_tuple_config_tf(graph_tuple, config):
+    """Update the first column (configuration) of the node features while preserving sublattice encoding.
+    
+    This vectorized version avoids a while-loop and ensures that the output tensor is immediately available
+    in the outer graph.
+    """
+    # Ensure config is a 1D tensor (shape [num_nodes]) in float64.
+    config = tf.convert_to_tensor(config, dtype=tf.float64)
+    # Anchor the existing nodes.
+    existing_nodes = tf.identity(graph_tuple.nodes)
+    # Replace the first column with the new configuration.
+    new_nodes = tf.concat([tf.reshape(config, (-1, 1)), existing_nodes[:, 1:]], axis=1)
+    # Force the updated nodes to be materialized.
+    new_nodes = tf.identity(new_nodes)
+    # Return a new graph tuple with updated node features.
+    return graph_tuple.replace(nodes=new_nodes)
+
+
+def generate_graph_tuples_configs_tf(graph_tuple, configs):
     graph_tuples=[]
     for config in configs:
         graph_tuples.append(update_graph_tuple_config_new(graph_tuple, config))
+
+        # graph_tuples.append(update_graph_tuple_config_tf(graph_tuple, config))
     return graph_tuples
+
+
+
 def compare_graph_tuples(graph_tuples1, graph_tuples2):
     if len(graph_tuples1) != len(graph_tuples2):
         return False
@@ -152,13 +174,6 @@ def state_from_config_amplitudes(configurations:list, amplitudes:list):
         scaled_states = [amp * state for amp, state in zip(amplitudes, states)]
         superposition_state = sum(scaled_states)  # Superposition of all states
         return superposition_state
-
-def neel_state(graph):
-    num_sites=len(graph.nodes)
-    sublattice_encoding = np.zeros((num_sites, 2))  # Two sublattices
-    sublattice_encoding[::2, 0] = 1  # Sublattice 1
-    sublattice_encoding[1::2, 1] = 1  # Sublattice 2 
-    return sublattice_encoding
 
 def create_2d_square_graph(lattice_size:tuple):
     G = nx.grid_2d_graph(*lattice_size, periodic=True)
@@ -238,11 +253,12 @@ def compare_sonnet_modules(snt1, snt2):
     return True
 
 def copy_to_non_trainable(module_a, module_b):
-    copy_weights = tf.group(*[vb.assign(va) for va, vb in zip(module_a.variables, module_b.variables)])
-    
+    # Use explicit variable assignment (safer than tf.group)
+    for va, vb in zip(module_a.variables, module_b.variables):
+        vb.assign(va)
     for var in module_b.variables:
         var._trainable = False 
-    # return module_b
+
 
 def compute_freq_and_amplitudes_from_configurations(configurations, amplitudes):
     """

@@ -1,14 +1,19 @@
 import multiprocessing as mp
-#from joblib import Parallel, delayed
 from multiprocessing import Pool
 import tensorflow as tf
 import numpy as np
 import time
 import sonnet as snt
 from compgraph.cg_repr import config_hamiltonian_product, graph_tuple_to_config_hamiltonian_product_update
-from compgraph.tensor_wave_functions import evaluate_model, time_evoluted_config_amplitude
+from compgraph.useful import generate_graph_tuples_configs, graph_tuple_toconfig, update_graph_tuple_config, generate_graph_tuples_configs_tf
+from compgraph.tensorflow_version.hamiltonian_operations import graph_hamiltonian_jit
+from compgraph.tensorflow_version.graph_tuple_manipulation import get_single_graph_from_batch  
+
+from typing import Tuple
+from graph_nets.graphs import GraphsTuple
+
+
 # import line_profiler
-from compgraph.useful import generate_graph_tuples_configs, graph_tuple_toconfig, update_graph_tuple_config, generate_graph_tuples_configs_new
 # import atexit
 # profile = line_profiler.LineProfiler()
 # atexit.register(profile.print_stats)
@@ -26,150 +31,294 @@ def propose_graph_tuple(graph_tuple):
     proposed_nodes[i, 0] *= -1  # Flip the spin at this node
     return graph_tuple.replace(nodes=tf.constant(proposed_nodes))
 
-# def propose_graph_tuple(graph_tuple):
-#     """
-#     Propose a new graph tuple by flipping the spin of a randomly selected node.
-#     Args: graph_tuple (tf.Tensor): The input graph tuple.
-#     Returns: tf.Tensor: The proposed graph tuple with the spin of one node flipped.
-#     """
-#     nodes = graph_tuple.nodes 
-#     # Randomly pick a node index i to flip
-#     i = tf.random.uniform(
-#         shape=[],               
-#         minval=0,
-#         maxval=tf.shape(nodes)[0],
-#         dtype=tf.int32
-#     )
 
-#     flipped_spin = -nodes[i, 0]
-
-#     updated_nodes = tf.tensor_scatter_nd_update(
-#         tensor=nodes,
-#         indices=[[i, 0]],       # the row/column to update
-#         updates=[flipped_spin]  # the new value
-#     )
-
-#     # Return a new graph tuple with the updated node spins
-#     return graph_tuple.replace(nodes=updated_nodes)
 
 class MCMCSampler:
-    def __init__(self, model, current_tuple, beta=None, graph=None, initialized=False):
+    def __init__(self, model, current_tuple, beta=None, graph=None, initialized=False, edge_pairs=None):
         self.model = model
         self.tuple = current_tuple
         self.beta = beta
         self.graph = graph
-        # self.sublattice_encoding = sublattice_encoding
+        self.edge_pairs = edge_pairs
         self.initialized=initialized
         if not self.initialized:
             self.model(current_tuple)
             self.initialized=True 
     def update_model(self, model):
         self.model = model
+    # @tf.function(jit_compile=True)
     def evaluate_model(self, graph_tuple):
-        amplitude, phase = self.model(graph_tuple)[0]
-        return tf.complex(real=amplitude* tf.cos(phase), imag=amplitude * tf.sin(phase))
+        output=self.model(graph_tuple)
+        amplitude, phase = output[0][0],output[0][1]
+        return tf.complex(real=amplitude * tf.cos(phase),
+                        imag=amplitude * tf.sin(phase))
+
     def time_evoluted_config_amplitude(self, graph_tuple):
+        # Obtain the nonzero graph tuples and their amplitudes.
         graph_tuples_nonzero, amplitudes_gt = graph_tuple_to_config_hamiltonian_product_update(graph_tuple, self.graph)
+        
+        # Print the number of nonzero graph tuples using Python's len()
+        # tf.print("Number of nonzero graph tuples:", len(graph_tuples_nonzero))
+        
         final_amplitude = []
         for i, gt in enumerate(graph_tuples_nonzero):
-            amplitude, phase = self.model(gt)[0]
-            amplitude *= amplitudes_gt[i]
-            complex_coefficient = tf.complex(real=amplitude* tf.cos(phase), imag=amplitude * tf.sin(phase))
+            # Debug: print the nodes of the current graph tuple.
+            # tf.print("Graph tuple", i, "nodes:", gt.nodes)
+            
+            # Evaluate the model on the current graph tuple.
+            output = self.model(gt)
+            # tf.print("Model output for tuple", i, ":", output)
+            
+            amplitude, phase = output[0][0], output[0][1]
+            # tf.print("Amplitude:", amplitude, "Phase:", phase)
+            
+            amplitude = amplitude * amplitudes_gt[i]
+            complex_coefficient = tf.complex(real=amplitude * tf.cos(phase),
+                                            imag=amplitude * tf.sin(phase))
+            # tf.print("Complex coefficient for tuple", i, ":", complex_coefficient)
             final_amplitude.append(complex_coefficient)
-        beta = -1. * self.beta
+        
+        beta = -1.0 * self.beta
         total_amplitude = tf.multiply(beta, tf.reduce_sum(tf.stack(final_amplitude)))
+        
+        # Evaluate the baseline output.
         complex_coefficient = self.evaluate_model(graph_tuple)
+        # tf.print("Baseline model output:", complex_coefficient)
+        
         total_amplitude = tf.add(complex_coefficient, total_amplitude)
+        # tf.print("Total amplitude:", total_amplitude)
+        
         return total_amplitude
+    @tf.function(jit_compile=True)
+    def ite_step(self, new_graphs, all_amplitudes, initial_gt):
+        baseline_output = self.evaluate_model(initial_gt)  # Ensure this takes a single graph
 
-    # @profile
-    # @tf.function
-    # def monte_carlo_update(self, N_sweeps, graph_tuple, approach):
-    #     self.tuple = graph_tuple
-    #     state=self.tuple
-    #     if approach == 'var':
-    #         psi = self.evaluate_model(state)
+        # Evaluate the model on all new graphs in a single batch operation
+        model_outputs =self.model(new_graphs)  # shape: [batch_size, 2]
+        # Extract amplitude and phase from model output
+        # return model_outputs
 
-    #         for _ in tf.range(N_sweeps):
-    #             proposed_graph_tuple = propose_graph_tuple(state)
-    #             psi_new = self.evaluate_model(proposed_graph_tuple)
-    #             p_accept = tf.minimum(tf.constant(1.0, dtype=tf.float64), tf.abs(psi_new / psi)**2)
-    #             if tf.random.uniform([], dtype=tf.float64) < p_accept:
-    #                 psi=psi_new
+        amplitudes, phases = model_outputs[:, 0], model_outputs[:, 1]
 
-    #                 state = proposed_graph_tuple
-    #     elif approach == 'te':
-    #         psi = self.time_evoluted_config_amplitude(state)
+        # return amplitudes, phases, all_amplitudes
+        # Compute the complex coefficients
+        complex_coefficients = tf.complex(
+            real=amplitudes * tf.cos(phases),
+            imag=amplitudes * tf.sin(phases)
+        )
+        beta = -1.0 * self.beta
+        # Multiply by the Hamiltonian amplitudes
+        weighted_coefficients = complex_coefficients * all_amplitudes
+        # Scale by β and sum the contributions
+        
+        total_amplitude = beta * tf.reduce_sum(weighted_coefficients)    
+        # Compute the baseline model output for the original graph
 
-    #         for _ in tf.range(N_sweeps):
-    #             proposed_graph_tuple = propose_graph_tuple(state)
-    #             psi_new = self.time_evoluted_config_amplitude(proposed_graph_tuple)
-    #             p_accept = tf.minimum(tf.constant(1.0, dtype=tf.float64), tf.abs(psi_new / psi)**2)
-
-    #             if tf.random.uniform([], dtype=tf.float64) < p_accept:
-    #                 psi=psi_new
-    #                 state = proposed_graph_tuple
-
-    #     self.tuple = state
-    #     return state, psi
-    # @tf.function
-    import tracemalloc
+        # Add the baseline contribution
+        total_amplitude = baseline_output + total_amplitude
+        return total_amplitude
+    # @tf.function()
+    def time_evoluted_config_amplitude_tf(self, graph_tuple, j2: float = 0.0):
+        """Compute the time-evolved configuration and amplitude for a given configuration."""
+        # Compute the new configurations and amplitudes
+        # Compute all new configurations and their amplitudes in one call
+        # tf.print("shape of edge pairs",tf.shape(self.edge_pairs))
+        new_graphs, all_amplitudes = graph_hamiltonian_jit(graph_tuple,self.edge_pairs, j2)
+        # print("New Graphs generated by time evoluted config amplitudes", new_graphs)
+        all_amplitudes=tf.cast(all_amplitudes, tf.complex64)
+        # return all_amplitudes
+        return self.ite_step(new_graphs, all_amplitudes, graph_tuple)
 
     def monte_carlo_update(self, N_sweeps, graph_tuple, approach):
-        """
-        Debug version of monte_carlo_update with extra tracemalloc snapshots.
-        WARNING: This will print a lot of output if N_sweeps is large.
-        """
         state = graph_tuple
-        
-        # Decide which method to call initially
-        snapshot_before_init = tracemalloc.take_snapshot()
         if approach == 'var':
             psi = self.evaluate_model(state)
         else:
             psi = self.time_evoluted_config_amplitude(state)
-        snapshot_after_init = tracemalloc.take_snapshot()
-        top_stats_init = snapshot_after_init.compare_to(snapshot_before_init, 'traceback')
-        print("\n[TRACEMALLOC] After initial wavefunction eval:")
-        for i, stat in enumerate(top_stats_init[:3], 1):
-            print(f"  {i}. {stat}")
-
-        # Main loop
         for sweep_idx in range(N_sweeps):
-            # Snapshot before propose_graph_tuple
-            snapshot_before_propose = tracemalloc.take_snapshot()
-
             proposed_graph_tuple = propose_graph_tuple(state)
-
-            snapshot_after_propose = tracemalloc.take_snapshot()
-            top_stats_propose = snapshot_after_propose.compare_to(snapshot_before_propose, 'traceback')
-            print(f"\n[TRACEMALLOC] After propose_graph_tuple (sweep {sweep_idx}):")
-            for i, stat in enumerate(top_stats_propose[:3], 1):
-                print(f"  {i}. {stat}")
-
-            # Evaluate wavefunction
-            snapshot_before_eval = tracemalloc.take_snapshot()
-            
             if approach == 'var':
                 psi_new = self.evaluate_model(proposed_graph_tuple)
             else:
                 psi_new = self.time_evoluted_config_amplitude(proposed_graph_tuple)
+            print("What is the step",sweep_idx, "the type is",tf.square(tf.abs(psi_new / psi)))
+            p_accept = tf.minimum(tf.constant(1.0, dtype=tf.float64), tf.square(tf.abs(psi_new / psi)))
+            state, psi = tf.cond(
+                tf.less(tf.random.uniform([], dtype=tf.float64), p_accept),
+                lambda: (proposed_graph_tuple, psi_new),
+                lambda: (state, psi)
+            )
+        return state, psi    
+    @staticmethod
+    @tf.function(jit_compile=True)
+    def propose_graph_batch(graphs_batch: GraphsTuple) -> GraphsTuple:
+        """Propose new configurations for entire batch by flipping 1 node/graph"""
+        # Get batch dimensions
+        num_graphs = tf.shape(graphs_batch.n_node)[0]
+        nodes_per_graph = graphs_batch.n_node[0]
+        total_nodes = num_graphs * nodes_per_graph
 
-            snapshot_after_eval = tracemalloc.take_snapshot()
-            top_stats_eval = snapshot_after_eval.compare_to(snapshot_before_eval, 'traceback')
-            print(f"[TRACEMALLOC] After wavefunction eval (sweep {sweep_idx}):")
-            for i, stat in enumerate(top_stats_eval[:3], 1):
-                print(f"  {i}. {stat}")
+        # Generate random flip indices [num_graphs]
+        flip_indices = tf.random.uniform(
+            shape=[num_graphs],
+            maxval=nodes_per_graph,
+            dtype=tf.int32
+        )
 
-            # Accept/reject
-            p_accept = tf.minimum(tf.constant(1.0, dtype=tf.float64),
-                                tf.square(tf.abs(psi_new / psi)))
-            if tf.random.uniform([], dtype=tf.float64) < p_accept:
-                psi = psi_new
-                state = proposed_graph_tuple
+        # Create global indices for scatter update
+        graph_offsets = tf.range(num_graphs) * nodes_per_graph
+        global_indices = graph_offsets + flip_indices  # [num_graphs]
+        
+        # Create updates tensor
+        original_spins = tf.gather(graphs_batch.nodes[:, 0], global_indices)
+        updates = -original_spins  # Flip spins
+        
+        # Apply scatter update
+        update_indices = tf.stack([global_indices, tf.zeros_like(global_indices)], axis=1)
+        new_nodes = tf.tensor_scatter_nd_update(
+            tensor=graphs_batch.nodes,
+            indices=update_indices,
+            updates=updates
+        )
 
-        return state, psi
+        return graphs_batch.replace(nodes=new_nodes)
+    
+    @staticmethod
+    @tf.function(jit_compile=True)
+    def calculate_acceptance_prob(psi_old: tf.Tensor, psi_new: tf.Tensor) -> tf.Tensor:
+        """Vectorized acceptance probability calculation"""
+        ratios = tf.abs(psi_new[:, 0] / psi_old[:, 0])  # Amplitude ratios
+        return tf.minimum(1.0, tf.square(ratios))
 
+    @staticmethod
+    @tf.function(jit_compile=True)
+    def update_batch_with_mask(current_batch, proposed_batch, accepted_mask):
+        """
+        For each graph in the batch, if accepted_mask[b] is True, take proposed_batch.nodes; else keep current_batch.nodes.
+        Returns an updated GraphsTuple (only nodes change).
+        """
+        B = tf.shape(current_batch.n_node)[0]
+        N = current_batch.n_node[0]
+        D = tf.shape(current_batch.nodes)[1]
+        
+        # Reshape nodes fields: [B, N, D]
+        current_nodes = tf.reshape(current_batch.nodes, [B, N, D])
+        proposed_nodes = tf.reshape(proposed_batch.nodes, [B, N, D])
+        
+        # Expand accepted_mask for broadcasting: [B, 1, 1]
+        accepted_mask_exp = tf.reshape(accepted_mask, [B, 1, 1])
+        
+        # Select proposed nodes where accepted, current nodes otherwise
+        new_nodes = tf.where(accepted_mask_exp, proposed_nodes, current_nodes)
+        new_nodes_flat = tf.reshape(new_nodes, [B * N, D])
+        
+        return current_batch.replace(nodes=new_nodes_flat)
+    # Very IMPORTANT: 
+    """
+    The jit compilation is not working for the monte_carlo_update_on_batch function. If inserting jit the full loop is jit compiled
+    Further this is retraced every time the function is called causing memory growth.
+    Since the inference on monte carlo update on batch can be very quick and jit compilation is slow we should avoid to use jit compile 
+    on this loop. It can not be done efficiently with my current knowledge 
+    use mcmc_loop to generate plots of the problem
+    """
+    @tf.function()  # Add JIT here
+    def monte_carlo_update_on_batch(self, GT_batch: GraphsTuple, N_sweeps: int) -> Tuple[GraphsTuple, tf.Tensor]:
+        """Vectorized Monte Carlo update for entire batch"""
+        # Initial evaluation we only care about the amplitudes, 
+        # here we assume the model returns the amplitudes and the phases for each graph in the batch
+        psi = self.model(GT_batch)
+        current_psi = psi
+        del psi
+        current_batch=GT_batch
+        shape=tf.shape(GT_batch.n_node)[0]
+        print("This is the shape, dummy check for retracing!",shape)
+        for _ in range(N_sweeps):
+            # Propose new batch
+            proposed_batch = self.propose_graph_batch(current_batch)
+            psi_new = self.model(proposed_batch)
+            # tf.print("What is the step",_)
+
+            # Calculate acceptance probabilities
+            p_accept = self.calculate_acceptance_prob(current_psi, psi_new)
+            
+            # Create acceptance mask
+            rand_vals = tf.random.uniform(
+                shape=[shape], 
+                dtype=tf.float32
+            )
+            accept_mask = rand_vals < p_accept
+            
+            current_batch = self.update_batch_with_mask(current_batch,proposed_batch,accept_mask)
+            # Update current psi values
+            current_psi = tf.where(
+                accept_mask[:, tf.newaxis], 
+                psi_new, 
+                current_psi
+            )
+            del proposed_batch, psi_new
+
+        return current_batch, current_psi
+
+# # @tf.function()
+# @tf.function()
+# def compute_phi_terms(batched_graphs: GraphsTuple, sampler: MCMCSampler):
+#     """Memory-efficient implementation using TensorArray instead of tf.map_fn."""
+#     batch_size = tf.shape(batched_graphs.n_node)[0]
+    
+#     # Create a TensorArray to store results
+#     result_array = tf.TensorArray(tf.complex64, size=batch_size, clear_after_read=True)
+    
+#     # Loop through the batch
+#     for i in range(batch_size):
+#         # Get single graph from batch
+#         single_graph = get_single_graph_from_batch(batched_graphs, i)
+        
+#         # Compute phi term for this graph
+#         phi_term = sampler.time_evoluted_config_amplitude_tf(single_graph, sampler.edge_pairs)
+        
+#         # Store result in array
+#         result_array = result_array.write(i, phi_term)
+    
+#     # Stack all results
+#     return result_array.stack()
+@tf.function()
+def compute_phi_terms(batched_graphs: GraphsTuple, sampler: MCMCSampler):
+    batch_size = tf.shape(batched_graphs.n_node)[0]
+    # print("This is the batch size",batch_size)
+    # print("This is the batched graphs",batched_graphs)
+    # Map over each graph in the batch.
+
+    def single_graph_phi(i):
+        single_graph = get_single_graph_from_batch(batched_graphs, i)
+        # print("This is the single graph",single_graph)
+        return sampler.time_evoluted_config_amplitude_tf(single_graph, sampler.edge_pairs)
+    
+    # tf.map_fn will execute single_graph_phi for each index in [0, batch_size)
+    return tf.map_fn(single_graph_phi, tf.range(batch_size), dtype=tf.complex64)
+# @tf.function()
+# def compute_phi_terms(batched_graphs, sampler):
+#     """Memory-optimized phi terms computation with TensorArray."""
+#     batch_size = tf.shape(batched_graphs.n_node)[0]
+#     ta = tf.TensorArray(tf.complex64, size=batch_size, clear_after_read=True)
+    
+#     def single_graph_phi(i):
+#         # Extract single graph from batch
+#         single_graph = get_single_graph_from_batch(batched_graphs, i)
+#         # Use existing function without changing its signature
+#         return sampler.time_evoluted_config_amplitude_tf(single_graph, sampler.edge_pairs)
+    
+#     def body(i, result_array):
+#         phi = single_graph_phi(i)
+#         return i + 1, result_array.write(i, phi)
+    
+#     _, result_ta = tf.while_loop(
+#         lambda i, _: i < batch_size,
+#         body,
+#         (0, ta),
+#         parallel_iterations=10
+#     )
+    
+#     return result_ta.stack()
 def stochastic_energy(model_var:MCMCSampler, graph, graph_tuple_configs, frequencies=None, J2=None):
     energy=0.+0.j
     local_energies=[]
@@ -190,7 +339,7 @@ def stochastic_energy(model_var:MCMCSampler, graph, graph_tuple_configs, frequen
         configurations_nonzero, coefficients = config_hamiltonian_product(config_gt, graph, J2)
 
         # Generate graph tuples for the non-zero configurations
-        graph_tuples_nonzero = generate_graph_tuples_configs_new(gt, configurations_nonzero)
+        graph_tuples_nonzero = generate_graph_tuples_configs_tf(gt, configurations_nonzero)
 
         # Loop over the non-zero configurations to calculate their contributions to the energy
         for idx_nonzero, nonzero_gt in enumerate(graph_tuples_nonzero):
@@ -297,53 +446,3 @@ def stochastic_gradients(sampler_var,sampler_te, unique_tuples_var,freq_ampl_var
         stoch_gradients=tape.gradient(tf.reduce_sum(stoch_estimation), sampler_var.model.trainable_variables)
         # print(stoch_gradients[0])
     return stoch_gradients    
-import tracemalloc
-def stochastic_gradients_malloc(sampler_var, sampler_te, unique_tuples_var, freq_ampl_var):
-    snapshot_before_tape = tracemalloc.take_snapshot()
-    
-    with tf.GradientTape() as tape:
-        tape.watch(sampler_var.model.trainable_variables)
-
-        # Snap before building psi_terms
-        snapshot_before_psi = tracemalloc.take_snapshot()
-        psi_terms = tf.stack([sampler_var.evaluate_model(gt) for gt in unique_tuples_var])
-        snapshot_after_psi = tracemalloc.take_snapshot()
-        top_stats_psi = snapshot_after_psi.compare_to(snapshot_before_psi, 'traceback')
-        print("\n[TRACEMALLOC] After building psi_terms:")
-        for i, stat in enumerate(top_stats_psi[:3], 1):
-            print(f"  {i}. {stat}")
-
-        # Snap before building phi_terms
-        snapshot_before_phi = tracemalloc.take_snapshot()
-        phi_terms = tf.stack([sampler_te.time_evoluted_config_amplitude(gt) for gt in unique_tuples_var])
-        snapshot_after_phi = tracemalloc.take_snapshot()
-        top_stats_phi = snapshot_after_phi.compare_to(snapshot_before_phi, 'traceback')
-        print("[TRACEMALLOC] After building phi_terms:")
-        for i, stat in enumerate(top_stats_phi[:3], 1):
-            print(f"  {i}. {stat}")
-
-        log_psi = tf.math.log(tf.math.conj(psi_terms))
-        ratio_phi_psi = tf.stop_gradient(phi_terms / psi_terms)
-
-        stoch_estimation = freq_ampl_var * log_psi \
-                           - ratio_phi_psi * log_psi * freq_ampl_var \
-                             / tf.reduce_sum(ratio_phi_psi * freq_ampl_var)
-
-        loss = tf.reduce_sum(stoch_estimation)
-
-    snapshot_before_grad = tracemalloc.take_snapshot()
-    stoch_gradients = tape.gradient(loss, sampler_var.model.trainable_variables)
-    snapshot_after_grad = tracemalloc.take_snapshot()
-
-    top_stats_grad = snapshot_after_grad.compare_to(snapshot_before_grad, 'traceback')
-    print("[TRACEMALLOC] After computing gradients:")
-    for i, stat in enumerate(top_stats_grad[:3], 1):
-        print(f"  {i}. {stat}")
-
-    snapshot_after_tape = tracemalloc.take_snapshot()
-    top_stats_tape = snapshot_after_tape.compare_to(snapshot_before_tape, 'traceback')
-    print("[TRACEMALLOC] End of stochastic_gradients (Tape scope):")
-    for i, stat in enumerate(top_stats_tape[:3], 1):
-        print(f"  {i}. {stat}")
-
-    return stoch_gradients

@@ -2,10 +2,7 @@ from compgraph.useful import node_to_index, create_graph_tuples
 import numpy as np
 import networkx as nx
 from compgraph.useful import generate_graph_tuples_configs
-# import line_profiler
-# import atexit
-# profile2 = line_profiler.LineProfiler()
-# atexit.register(profile2.print_stats)
+import tensorflow as tf
 
 def apply_raising_operator(config, site):
     """
@@ -82,7 +79,57 @@ def apply_edge_contribution(config, i, j):
 
     return new_configs    
 
+def apply_raising_operator_tf(config, site):
+    """Apply the spin raising operator on a given site (TensorFlow version)."""
+    new_config = tf.identity(config)  # Create a copy
+    if new_config[site] == -1:
+        new_config = tf.tensor_scatter_nd_update(new_config, [[site]], [1])  # Spin flip
+        return new_config
+    else:
+        return None
 
+def apply_lowering_operator_tf(config, site):
+    """Apply the spin lowering operator on a given site (TensorFlow version)."""
+    new_config = tf.identity(config)  # Create a copy
+    if new_config[site] == 1:
+        new_config = tf.tensor_scatter_nd_update(new_config, [[site]], [-1])  # Spin flip
+        return new_config
+    else:
+        return None
+
+def are_configs_identical_tf(config1, config2):
+    """Check if two configurations are identical (TensorFlow version)."""
+    return tf.reduce_all(tf.equal(config1, config2))
+
+def configs_differ_by_two_sites_tf(config1, config2):
+    """Check if two configurations differ by exactly two sites (TensorFlow version)."""
+    return tf.equal(tf.reduce_sum(tf.cast(tf.not_equal(config1, config2), dtype=tf.int32)), 2)
+
+def apply_edge_contribution_tf(config, i, j):
+    """Apply edge contribution based on spin operators (TensorFlow version)."""
+    new_configs = []
+    if config[i] != config[j]:
+        # Apply the spin raising operator on site i and lowering on site j
+        new_config_raised = apply_raising_operator_tf(config, i)
+        if new_config_raised is not None:
+            new_config_lowered = apply_lowering_operator_tf(new_config_raised, j)
+        else:
+            new_config_lowered = None
+
+        # Apply the spin lowering operator on site i and raising on site j
+        new_config_lowered_initial = apply_lowering_operator_tf(config, i)
+        if new_config_lowered_initial is not None:
+            new_config_raised = apply_raising_operator_tf(new_config_lowered_initial, j)
+        else:
+            new_config_raised = None
+
+        # Combine the new configurations if they are not None
+        if new_config_raised is not None:
+            new_configs.append(new_config_raised)
+        if new_config_lowered is not None:
+            new_configs.append(new_config_lowered)
+
+    return new_configs
 
 def square_2dham_exp(psi, graph, phi, J2, configs_psi, configs_phi):
     expectation_value = 0
@@ -95,7 +142,7 @@ def square_2dham_exp(psi, graph, phi, J2, configs_psi, configs_phi):
     for (k,config_psi) in enumerate(configs_psi):
         for (l,config_phi) in enumerate(configs_phi):
             # print(l,k, "Config", config_psi, config_phi)
-            # print(psi, phi, "those are the states ")
+            # print(psi, phi, "those are the states ")ws
             if are_configs_identical(config_phi,config_psi):
                 expectation_value += (J1+J2)*psi[k].conj()*phi[l]
             elif configs_differ_by_two_sites(config_phi,config_psi):
@@ -127,6 +174,7 @@ def square_2dham_exp(psi, graph, phi, J2, configs_psi, configs_phi):
 
     print("end of square 2d function")
     return expectation_value
+
 def config_hamiltonian_product(config, graph, J2=0):
     configs=[]
     amplitudes=[]
@@ -184,6 +232,8 @@ def graph_tuple_to_config_hamiltonian_product_update(graph_tuple, graph):
     graph = nx.relabel_nodes(graph, node_to_index(graph))
     #First function, the other one is built on this subroutine, that works also for just configurations
     config= graph_tuple.nodes[:, 0].numpy()
+    # config=tf.reshape(graph_tuple.nodes[:, 0], [-1]) 
+    print(config, "you are good to go! Maybe...")
     configs, amplitudes= config_hamiltonian_product(config, graph)
     #print('final configs from function nonzero amp', configs)        
     
@@ -205,4 +255,89 @@ def configs_nonzeroamplitude_nnn(graph_tuple, graph, sublattice_encoding):
     configs=np.array(configs)
     graph_tuples_generated=create_graph_tuples(configs, graph,sublattice_encoding) 
         
+    return graph_tuples_generated
+def square_2dham_exp_tf(psi, graph, phi, J2, configs_psi, configs_phi):
+    """Calculate the expectation value of the Hamiltonian (TensorFlow version)."""
+    expectation_value = tf.constant(0.0, dtype=tf.complex128)
+    nd_to_index = node_to_index(graph)
+    graph = nx.relabel_nodes(graph, node_to_index(graph))
+    J1 = tf.constant(1.0, dtype=tf.float64)  # Fixed coupling constant
+
+    for k in tf.range(tf.shape(configs_psi)[0]):
+        for l in tf.range(tf.shape(configs_phi)[0]):
+            config_psi = configs_psi[k]
+            config_phi = configs_phi[l]
+            if are_configs_identical_tf(config_phi, config_psi):
+                expectation_value += (J1 + J2) * tf.math.conj(psi[k]) * phi[l]
+            elif configs_differ_by_two_sites_tf(config_phi, config_psi):
+                for i, j in graph.edges:
+                    i_index = nd_to_index[i]
+                    j_index = nd_to_index[j]
+                    off_diag = apply_edge_contribution_tf(config_psi, i_index, j_index)
+                    if off_diag is not None:
+                        for new_config in off_diag:
+                            if are_configs_identical_tf(new_config, config_phi):
+                                expectation_value += 0.5 * J1 * tf.math.conj(psi[k]) * phi[l]
+                # Add next-nearest neighbor interactions
+                for i in graph.nodes:
+                    i_index = nd_to_index[i]
+                    for j in graph.neighbors(i):
+                        j_index = nd_to_index[j]
+                        off_diag = apply_edge_contribution_tf(config_psi, i_index, j_index)
+                        if off_diag is not None:
+                            for new_config in off_diag:
+                                if are_configs_identical_tf(new_config, config_phi):
+                                    expectation_value += 0.5 * J2 * tf.math.conj(psi[l]) * phi[k]
+
+    print("end of square 2d function")
+    return expectation_value
+
+def config_hamiltonian_product_tf(config, graph, J2=0.0):
+    """Calculate the Hamiltonian product for a given configuration."""
+    configs = []
+    amplitudes = []
+    diagonal_contribution = 0.0
+    multiplier = 1.0
+    if tf.equal(tf.shape(config)[0], 4):  # Use tf.shape and tf.equal
+        multiplier = 2.0
+
+    for i, j in graph.edges:
+        if config[i] == config[j]:
+            diagonal_contribution += 1/4
+        else:
+            diagonal_contribution -= 1/4
+
+        configs_temp = apply_edge_contribution(config, i, j)
+        if len(configs_temp) > 0:
+            configs.append(configs_temp[0])
+            amplitudes.append(multiplier * 0.5)
+
+    if diagonal_contribution != 0:
+        configs.append(config)
+        amplitudes.append(multiplier * diagonal_contribution)
+
+    return tf.stack(configs), tf.stack(amplitudes)  # Use tf.stack
+
+def graph_tuple_to_config_hamiltonian_product_update_tf(graph_tuple, graph):
+    """Convert graph tuple to config Hamiltonian product."""
+    graph = nx.relabel_nodes(graph, node_to_index(graph))
+    config = tf.reshape(graph_tuple.nodes[:, 0], [-1])  # Use tf.reshape
+    configs, amplitudes = config_hamiltonian_product_tf(config, graph)
+    graph_tuples_generated = generate_graph_tuples_configs(graph_tuple, configs)
+
+    return graph_tuples_generated, amplitudes
+
+def configs_nonzeroamplitude_nnn_tf(graph_tuple, graph, sublattice_encoding):
+    """Find configurations with non-zero amplitude."""
+    config = tf.reshape(graph_tuple.nodes[:, 0], [-1])  # Use tf.reshape
+    configs = []
+    for i in graph.nodes:
+        for j in graph.neighbors(i):
+            configs_temp = apply_edge_contribution_tf(config, i, j)
+
+            if len(configs_temp) > 0:
+                configs.append(configs_temp[0])
+    configs = tf.stack(configs)  # Use tf.stack
+    graph_tuples_generated = generate_graph_tuples_configs(graph_tuple, configs)
+
     return graph_tuples_generated

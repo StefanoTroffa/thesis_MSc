@@ -42,3 +42,11 @@ config.py
 slurm*
 
 *mprofile*
+tests/logs_example/*
+logs/*
+cuda*
+cluster_data/*
+tests/logs/*
+tests/cluster_data/*    
+tests/*/*.png
+tests/**/*DESK*

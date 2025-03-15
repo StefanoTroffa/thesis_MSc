@@ -19,7 +19,7 @@ from multiprocessing import Pool
 
 from compgraph.cg_repr import config_hamiltonian_product, graph_tuple_to_config_hamiltonian_product_update
 # import line_profiler
-from compgraph.useful import graph_tuple_toconfig, generate_graph_tuples_configs_new
+from compgraph.useful import graph_tuple_toconfig, generate_graph_tuples_configs_tf
 # import atexit
 # profile = line_profiler.LineProfiler()
 # atexit.register(profile.print_stats)
@@ -116,7 +116,7 @@ def stochastic_energy(model_var:MCMCSampler, graph, graph_tuple_configs, frequen
         configurations_nonzero, coefficients = config_hamiltonian_product(config_gt, graph, J2)
 
         # Generate graph tuples for the non-zero configurations
-        graph_tuples_nonzero = generate_graph_tuples_configs_new(gt, configurations_nonzero)
+        graph_tuples_nonzero = generate_graph_tuples_configs_tf(gt, configurations_nonzero)
 
         # Loop over the non-zero configurations to calculate their contributions to the energy
         for idx_nonzero, nonzero_gt in enumerate(graph_tuples_nonzero):
@@ -247,7 +247,7 @@ def inner_training(model_var, model_fix_for_te, graph_batch_var,graph_batch_te, 
     
     return output, loss
 
-@mprofile
+# @mprofile
 def outer_training(outer_steps, inner_steps, sublattice_encoding, graph,
                    lowest_eigenstate_as_sparse, beta, initial_learning_rate, model_w, model_fix, graph_tuples_var, graph_tuples_te):
     """
@@ -350,7 +350,7 @@ def outer_training_mc(outer_steps, inner_steps, graph,
     optimizer = snt.optimizers.Adam(initial_learning_rate)
     if n_sites<17:
         fhs = np.array([[int(x) for x in format(i, f'0{n_sites}b')] for i in range(2**(n_sites))]) * 2 - 1
-        fh_gt=generate_graph_tuples_configs_new(graph_tuples_var[0],fhs)
+        fh_gt=generate_graph_tuples_configs_tf(graph_tuples_var[0],fhs)
     for step in range(outer_steps):
         are_identical = compare_sonnet_modules(sampler_var.model, sampler_te.model)
         # print("The models are identical before copying:", are_identical)
@@ -369,7 +369,7 @@ def outer_training_mc(outer_steps, inner_steps, graph,
             # Temporarily modified in asking two times the graph_tuples var
             wave_function_var_on_var, freq_var = create_amplitude_frequencies_from_graph_tuples(graph_tuples_var, coeff_var_on_var)
             freq_ampl_var = np.array(freq_var.values) / len(graph_tuples_var)
-            unique_tuples_var = generate_graph_tuples_configs_new(graph_tuples_var[0], sparse_list_to_configs(freq_var.indices[:, 0], n_sites))
+            unique_tuples_var = generate_graph_tuples_configs_tf(graph_tuples_var[0], sparse_list_to_configs(freq_var.indices[:, 0], n_sites))
 
             stoch_gradients=stochastic_gradients(sampler_var,sampler_te,unique_tuples_var,freq_ampl_var)
             #print("check of new inner functions", outputs==outputs2, loss==loss2)
