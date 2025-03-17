@@ -29,10 +29,10 @@ def log_weights(step, model, writer):
         print(f"Logging skipped: {str(e)}")
         tf.summary.text("errors/weight_logging", str(e), step=step)
     return
-def setup_tensorboard_logging():
+def setup_tensorboard_logging(location:str='vmc_run'):
     """Set up TensorBoard logging with a unique directory for each run"""
     current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_dir = f"logs/vmc_run_{current_time}"
+    log_dir = f"logs/{location}_{current_time}"
     # log_dir = "logs/vmc_run"
     
     summary_writer = tf.summary.create_file_writer(log_dir)
@@ -51,3 +51,19 @@ def log_gradient_norms(step, gradients, writer):
                 norm = tf.norm(grad)
                 tf.summary.scalar(f'gradients/norm_{i}', norm, step=step)
     return                
+
+
+def log_weights_and_nan_check(step, model, writer):
+    """
+    Log model weight histograms and the count of NaNs.
+    Software: Helps debug weight divergence or accumulation of NaNs.
+    Hardware: Assists in monitoring memory usage and precision issues on GPU/CPU.
+    """
+    with writer.as_default():
+        for var in model.trainable_variables:
+            tf.summary.histogram(f"weights/{var.name}", var, step=step)
+            nan_count = tf.reduce_sum(tf.cast(tf.math.is_nan(var), tf.int32))
+            tf.summary.scalar(f"nan_count/{var.name}", nan_count, step=step)
+            zero_count = tf.reduce_sum(tf.cast(tf.equal(var, 0.0), tf.int32))
+            tf.summary.scalar(f"zero_count/{var.name}", zero_count, step=step)
+            

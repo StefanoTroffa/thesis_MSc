@@ -1,6 +1,6 @@
 import sonnet as snt
 from compgraph.models import GNN_double_output, GNN_double_output_advanced
-from compgraph.useful import create_2d_square_graph, neel_state, create_graph_tuples
+from compgraph.useful import create_2d_square_graph, create_graph_tuples
 import time
 import numpy as np
 import tensorflow as tf
@@ -60,6 +60,27 @@ def initialize_NQS_model_fromhyperparams(ansatz:str, ansatz_params:dict):
         raise ValueError(f"This model cannot be initialized. The available models are: {available_models}")
 
 
+def neel_state(graph):
+    num_sites=len(graph.nodes)
+    sublattice_encoding = np.zeros((num_sites, 2))  # Two sublattices
+    sublattice_encoding[::2, 0] = 1  # Sublattice 1
+    sublattice_encoding[1::2, 1] = 1  # Sublattice 2 
+    return sublattice_encoding
+
+def disordered_state(graph):
+    """
+    Creates a disordered state encoding that maintains the same dimensionality
+    as the Néel state (2 features) but without spatial structure.
+    All nodes have the same encoding, representing a paramagnetic state.
+    """
+    num_sites = len(graph.nodes)
+    # Use uniform values but keep 2D feature representation for compatibility
+    sublattice_encoding = np.zeros((num_sites, 2))
+    # Set both channels to 0.5 to represent equal probability of both sublattices
+    sublattice_encoding[:, 0] = 0.5
+    sublattice_encoding[:, 1] = 0.5
+    return sublattice_encoding
+
 def apply_sublattice_encoding(graph, sublattice_type):
     """
     Apply the specified sublattice encoding to the given graph.
@@ -73,7 +94,8 @@ def apply_sublattice_encoding(graph, sublattice_type):
     """
     # Mapping of sublattice type strings to their corresponding functions
     sublattice_mapping = {
-        'Neel': neel_state
+        'Neel': neel_state,
+        'Disordered': disordered_state
     }
 
     if sublattice_type in sublattice_mapping:
@@ -140,10 +162,10 @@ def initialize_hamiltonian_and_groundstate(graph_params, full_basis_configs):
         '2dsquare': lambda n, m: qu.ham_heis_2D(n, m, j=1.0, bz=0, cyclic=True, parallel=False, ownership=None)
     }
 
-    graph_type = graph_params.get('graphType')
+    graph_type = graph_params.graphType
     if graph_type in hamiltonian_creators:
         # Create the Hamiltonian for the specified graph type
-        Hamiltonian_quimb = hamiltonian_creators[graph_type](graph_params['n'], graph_params['m'])
+        Hamiltonian_quimb = hamiltonian_creators[graph_type](graph_params.n, graph_params.m)
     else:
         raise ValueError(f"Unsupported graph type '{graph_type}'. Available types: {', '.join(hamiltonian_creators.keys())}")
 
@@ -151,7 +173,7 @@ def initialize_hamiltonian_and_groundstate(graph_params, full_basis_configs):
     lowest_eigenstate = qu.groundstate(Hamiltonian_quimb)
 
     # Convert the lowest eigenstate to a sparse vector
-    lowest_eigenstate_as_sparse = quimb_vec_to_sparse(lowest_eigenstate, full_basis_configs, graph_params['n']*graph_params['m'])
+    lowest_eigenstate_as_sparse = quimb_vec_to_sparse(lowest_eigenstate, full_basis_configs, graph_params.n*graph_params.m)
 
     return lowest_eigenstate_as_sparse
     

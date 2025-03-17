@@ -515,7 +515,7 @@ def minimal_vmc_run():
             'beta': 0.07,
             'batch_size': 4,
             'learning_rate': 7e-5,
-            'outer_loop': 5,
+            'outer_loop': 40,
             'inner_loop': 3,
         },
         'ansatz': 'GNN2simple',  # Name or type of your ansatz (adjust to your code)
