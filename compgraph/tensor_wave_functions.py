@@ -205,7 +205,7 @@ def quimb_vec_to_sparse(vector, configurations, num_sites):
     ampl = np.array(vector).flatten()
     # Check if the vector is complex
     if np.iscomplexobj(ampl):
-        ampl_complex = tf.convert_to_tensor(ampl, dtype=tf.complex128)
+        ampl_complex = tf.convert_to_tensor(ampl, dtype=tf.complex64)
     else:
         # If not complex, create the complex tensor
         ampl_complex = tf.complex(ampl, tf.zeros_like(ampl))

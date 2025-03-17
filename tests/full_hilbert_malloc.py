@@ -12,10 +12,30 @@ from dataclasses import dataclass, field
 
 # Import required modules
 from compgraph.tensorflow_version.graph_tuple_manipulation import initialize_graph_tuples_tf_opt, precompute_graph_structure
-from compgraph.tensorflow_version.logging_tf import log_gradient_norms, setup_tensorboard_logging, log_weights_and_nan_check
+from compgraph.tensorflow_version.logging_tf import log_gradient_norms, setup_tensorboard_logging
 from compgraph.tensorflow_version.memory_control import aggressive_memory_cleanup, count_tf_objects, inspect_tf_functions
 from simulation.initializer import create_graph_from_ham, initialize_NQS_model_fromhyperparams, initialize_hamiltonian_and_groundstate
 from compgraph.useful import copy_to_non_trainable
+
+
+
+def log_weights_and_nan_check(step, model, writer):
+    """
+    Log model weight histograms and the count of NaNs.
+    Software: Helps debug weight divergence or accumulation of NaNs.
+    Hardware: Assists in monitoring memory usage and precision issues on GPU/CPU.
+    """
+    with writer.as_default():
+        for var in model.trainable_variables:
+            tf.summary.histogram(f"weights/{var.name}", var, step=step)
+            nan_count = tf.reduce_sum(tf.cast(tf.math.is_nan(var), tf.int32))
+            tf.summary.scalar(f"nan_count/{var.name}", nan_count, step=step)
+            zero_count = tf.reduce_sum(tf.cast(tf.equal(var, 0.0), tf.int32))
+            tf.summary.scalar(f"zero_count/{var.name}", zero_count, step=step)
+            
+            
+
+
 # --- Data Classes ---
 @dataclass(frozen=True)
 class GraphParams:
@@ -26,9 +46,9 @@ class GraphParams:
 
 @dataclass(frozen=True)
 class SimParams:
-    beta: float = 0.05
-    learning_rate: float = 7e-3
-    outer_loop: int = 60
+    beta: float = 0.01
+    learning_rate: float = 7e-4
+    outer_loop: int = 120
     inner_loop: int = 8
 
 @dataclass
@@ -37,7 +57,7 @@ class Hyperams:
     graph_params: GraphParams = field(default_factory=GraphParams)
     sim_params: SimParams = field(default_factory=SimParams)
     ansatz: str = "GNN2simple"
-    ansatz_params: dict = field(default_factory=lambda: {"hidden_size": 128, "output_emb_size": 32})
+    ansatz_params: dict = field(default_factory=lambda: {"hidden_size": 64, "output_emb_size": 32})
 
 
 def log_training_metrics(summary_writer, step, metrics_dict):
@@ -127,6 +147,7 @@ def compute_exact_energy(model, graph_tuples, edge_pairs, J2=0.0):
     return tf.math.real(weighted_energy)
 
 from compgraph.tensorflow_version.hamiltonian_operations import graph_hamiltonian_jit
+
 def compute_exact_overlap(model_var, model_te, graph_tuples, beta, edge_pairs, J2=0.0):
     """
     Compute the exact overlap between variational and time-evolved states
@@ -193,20 +214,25 @@ def compute_exact_overlap(model_var, model_te, graph_tuples, beta, edge_pairs, J
         fn_output_signature=tf.complex64
     )
     
-    # Normalize both states
-    var_norm = tf.sqrt(tf.reduce_sum(tf.abs(var_psi)**2))
-    te_norm = tf.sqrt(tf.reduce_sum(tf.abs(te_psi)**2))
+    # Calculate probability amplitudes
+    var_probs = tf.abs(var_psi)**2
+    te_probs = tf.abs(te_psi)**2
     
-    var_psi_norm = var_psi / var_norm
-    te_psi_norm = te_psi / te_norm
+    # Normalize states directly using complex division
+    # TensorFlow requires matching types - converting the real norm to complex
+    var_psi_norm = var_psi / tf.cast(tf.sqrt(tf.reduce_sum(var_probs)), var_psi.dtype)
+    te_psi_norm = te_psi / tf.cast(tf.sqrt(tf.reduce_sum(te_probs)), te_psi.dtype)
     
     # Compute overlap: |⟨ψ_var|ψ_te⟩|^2
-    overlap = tf.abs(tf.reduce_sum(tf.math.conj(var_psi_norm) * te_psi_norm))**2
+    # Inner product between normalized states
+    inner_product = tf.reduce_sum(tf.math.conj(var_psi_norm) * te_psi_norm)
+    # Take absolute square to get probability
+    overlap = tf.abs(inner_product)**2
     
     return overlap
 
 
-@tf.function
+# @tf.function
 def exact_gradients(model_var, model_te, graph_tuples, beta, edge_pairs, J2=0.0):
     """
     Compute the exact gradients for the variational model
@@ -268,11 +294,11 @@ def run_exact_hilbert_simulation():
     print(f"Running exact Hilbert space simulation for {n_sites} sites (2^{n_sites} = {2**n_sites} states)")
     
     # Get the ground state if system is small enough
-    lowest_eigenstate_as_sparse = initialize_hamiltonian_and_groundstate(
-        hyperparams.graph_params,
-        np.array([[int(x) for x in format(i, f'0{n_sites}b')] for i in range(2**n_sites)]) * 2 - 1
-    ) if n_sites < 17 else None
-    
+    # lowest_eigenstate_as_sparse = initialize_hamiltonian_and_groundstate(
+    #     hyperparams.graph_params,
+    #     np.array([[int(x) for x in format(i, f'0{n_sites}b')] for i in range(2**n_sites)]) * 2 - 1
+    # ) if n_sites < 17 else None
+    lowest_eigenstate_as_sparse=None
     # Initialize models
     model_var = initialize_NQS_model_fromhyperparams(hyperparams.ansatz, hyperparams.ansatz_params)
     model_te = initialize_NQS_model_fromhyperparams(hyperparams.ansatz, hyperparams.ansatz_params)
@@ -301,7 +327,7 @@ def run_exact_hilbert_simulation():
 
     # Check for GPU availability
     physical_devices = tf.config.list_physical_devices('GPU')
-    tf.summary.trace_on(graph=True, profiler=True, profiler_outdir=log_dir)
+    # tf.summary.trace_on(graph=True, profiler=True, profiler_outdir=log_dir)
     
     # Import necessary functions from hamiltonian_operations
     from compgraph.tensorflow_version.hamiltonian_operations import graph_hamiltonian_jit
