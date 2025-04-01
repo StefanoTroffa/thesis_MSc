@@ -5,8 +5,10 @@ from graph_nets import modules
 from graph_nets import blocks
 
 # Custom initializer example
-initializer = tf.keras.initializers.HeNormal()  # He initialization for ReLU
+# initializer = tf.keras.initializers.HeNormal()  # He initialization for ReLU
 bias_initializer = tf.keras.initializers.Constant(0.1)  # Small positive value for biases
+initializer = tf.keras.initializers.GlorotUniform()  # Or TruncatedNormal(stddev=0.02)
+
 
 # Define the global model with custom initialization
 class MLPModel_glob(snt.Module):
@@ -155,6 +157,21 @@ class PoolingLayer_double_batch(snt.Module):
         out = tf.nn.elu(transformed + transformed_globals)
         return out
        
+class GNN_double_output_single(snt.Module):
+    def __init__(self,hidden_layer_size=tf.constant(128), output_emb_size=tf.constant(64)):
+        super(GNN_double_output_single, self).__init__()
+        self.encoder = Encoder(hidden_layer_size=hidden_layer_size,output_emb_size=output_emb_size)
+        print("Tracing and initializing model ohohoh!") # An eager-only side effect.
+        self.pooling_layer = PoolingLayer_double()
+    @tf.function(jit_compile=True)
+    def __call__(self, inputs):
+        print("Tracing and computing the call graph of the model ohohoh!") # An eager-only side effect.
+
+        encoded = self.encoder(inputs)
+
+        output = self.pooling_layer(encoded)
+        return output
+    
 class GNN_double_output(snt.Module):
     def __init__(self,hidden_layer_size=tf.constant(128), output_emb_size=tf.constant(64)):
         super(GNN_double_output, self).__init__()
@@ -169,7 +186,6 @@ class GNN_double_output(snt.Module):
 
         output = self.pooling_layer(encoded)
         return output
-
 
 # Define a comprehensive GNN model with custom initialization
 class GNN_double_output_advanced(snt.Module):

@@ -1,5 +1,5 @@
 import sonnet as snt
-from compgraph.models import GNN_double_output, GNN_double_output_advanced
+from compgraph.models import GNN_double_output_single, GNN_double_output_advanced, GNN_double_output
 from compgraph.useful import create_2d_square_graph, create_graph_tuples
 import time
 import numpy as np

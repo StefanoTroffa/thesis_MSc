@@ -1,4 +1,4 @@
-from compgraph.tensorflow_version.graph_tuple_manipulation import create_hamiltonian_batch_jit_r1, get_single_graph_from_batch
+from compgraph.tensorflow_version.graph_tuple_manipulation import update_graph_tuples_config_jit, create_hamiltonian_batch_jit_r1, get_single_graph_from_batch, create_hamiltonian_batch_xla
 
 
 import tensorflow as tf
@@ -83,6 +83,73 @@ def config_hamiltonian_product_jit_o3(config, edge_pairs, j2: float = 0.0):
     print("output shape of new configs and amplitudes", tf.shape(new_configs),tf.shape(new_amplitudes))
     return new_configs, new_amplitudes
 
+def config_hamiltonian_product_xla_improved(config, edge_pairs, j2: float = 0.0):
+    """XLA-compatible implementation with fixed config size."""
+    config = tf.convert_to_tensor(config)
+    num_edges = tf.shape(edge_pairs)[0]
+    
+    # Get the configuration size (number of nodes)
+    # Try to get static shape first, fall back to dynamic if needed
+    config_size = config.shape[0]
+    if config_size is None:  # If shape is dynamic
+        config_size = tf.shape(config)[0]
+    
+    # Gather spins for each edge
+    spin_i = tf.gather(config, edge_pairs[:, 0])
+    spin_j = tf.gather(config, edge_pairs[:, 1])
+    
+    # Compute diagonal contributions
+    spin_equal = tf.cast(tf.equal(spin_i, spin_j), tf.float32)
+    diag_contrib = 0.25 * (2.0 * spin_equal - 1.0)
+    diagonal_total = tf.reduce_sum(diag_contrib)
+    
+    # Create validity mask (1.0 where spins differ, 0.0 where equal)
+    valid_edge_mask = 1.0 - spin_equal  # 1.0 where spins differ
+    
+    # Use TensorArray with fixed size
+    config_array = tf.TensorArray(
+        dtype=config.dtype,
+        size=num_edges,
+        dynamic_size=False,
+        clear_after_read=False
+    )
+    
+    # Loop through edges and create configurations
+    for i in tf.range(num_edges):
+        new_config = tf.identity(config)
+        idx_i = edge_pairs[i, 0]
+        idx_j = edge_pairs[i, 1]
+        
+        # Apply both flips in a single operation if possible
+        indices = tf.stack([idx_i, idx_j])
+        updates = -tf.gather(new_config, indices)
+        new_config = tf.tensor_scatter_nd_update(
+            new_config,
+            tf.reshape(indices, [2, 1]),
+            updates
+        )
+        
+        # Store in the array
+        config_array = config_array.write(i, new_config)
+    
+    # Stack configurations
+    all_configs_tensor = config_array.stack()
+    
+    # Determine multiplier
+    multiplier = tf.cond(
+        tf.equal(config_size, 4),
+        lambda: tf.constant(2.0, dtype=tf.float32),
+        lambda: tf.constant(1.0, dtype=tf.float32)
+    )
+    
+    # Create amplitudes: 0.5*multiplier where valid, 0.0 where invalid
+    edge_amplitudes = multiplier * 0.5 * valid_edge_mask
+    
+    # Always add the original configuration with its diagonal amplitude
+    all_configs_with_orig = tf.concat([all_configs_tensor, tf.expand_dims(config, 0)], axis=0)
+    all_amplitudes = tf.concat([edge_amplitudes, [multiplier * diagonal_total]], axis=0)
+    
+    return all_configs_with_orig, all_amplitudes
 
 @tf.function(jit_compile=True)
 def graph_hamiltonian_jit(graph_tuple, edge_pairs, j2):
@@ -96,7 +163,17 @@ def graph_hamiltonian_jit(graph_tuple, edge_pairs, j2):
 
     return new_graphs, all_amplitudes
 
+@tf.function(jit_compile=True)
+def graph_hamiltonian_jit_xla(graph_tuple, edge_pairs, j2, template_graph):
+    # tf.print("Inputs:", tf.shape(graph_tuple.nodes), tf.shape(edge_pairs))
 
+    # config = tf.ensure_shape(graph_tuple.nodes[:,0], [None])
+
+    # Compute Hamiltonian terms
+    all_configs, all_amplitudes = config_hamiltonian_product_xla_improved(graph_tuple.nodes[:,0], edge_pairs, j2)
+    new_graphs = update_graph_tuples_config_jit(template_graph, all_configs)
+
+    return new_graphs, all_amplitudes
 # @tf.function(jit_compile=True)
 # @tf.function(jit_compile=True)
 @tf.function()
@@ -115,10 +192,46 @@ def stochastic_gradients_tfv3(phi_terms, GT_Batch_update, sampler_var):
         del tape, psi, psi_coeff, log_psi_conj, ratio_phi_psi
         # del psi_coeff, log_psi_conj, ratio_phi_psi
         return stoch_loss,  [tf.identity(g) if g is not None else None for g in gradients]
+# @tf.function()
+def stochastic_overlap_gradient(phi_terms, GT_Batch, sampler_var):
+    """
+    Correctly implements the gradient of log overlap with respect to model parameters,
+    using the gradient of log(psi).
+    """
+    with tf.GradientTape() as tape:
+        tape.watch(sampler_var.model.trainable_variables)
+        psi = sampler_var.model(GT_Batch)
+        psi_coeff = tf.complex(
+            psi[:,0] * tf.cos(psi[:,1]),
+            psi[:,0] * tf.sin(psi[:,1]))
+        log_psi = tf.math.log(psi_coeff)
+    
+    log_psi_gradients = tape.gradient(log_psi, sampler_var.model.trainable_variables)
+    phi_psi_ratio = phi_terms / psi_coeff
+    
+    avg_phi_psi = tf.reduce_mean(phi_psi_ratio)
+    
+    final_gradients = []
+    print("log psi gradients", tf.shape(log_psi_gradients))
+    print("phi psi ratio", tf.shape(phi_psi_ratio))
+    print("avg phi psi", tf.shape(avg_phi_psi)) 
+    for g in log_psi_gradients:
+        if g is None:
+            final_gradients.append(None)
+        else:
+            final_gradients.append(tf.math.real(tf.reduce_mean(phi_psi_ratio * g) / avg_phi_psi)
+            )
 
+    weighted_term= tf.reduce_mean(phi_psi_ratio * log_psi_gradients) / avg_phi_psi
+    unweighted_term = tf.reduce_mean(log_psi_gradients)
+    final_gradients = tf.math.real(weighted_term - unweighted_term)
+   
+    del tape, psi, psi_coeff, log_psi_gradients, phi_psi_ratio, avg_phi_psi
+ 
+    return [tf.identity(g) if g is not None else None for g in final_gradients]
 
 @tf.function()
-def stochastic_energy_tf(psi_new,sampler_var, edge_pairs, GT_Batch,J2):
+def stochastic_energy_tf(psi_new,sampler_var, edge_pairs,template_graph, GT_Batch,J2):
 
     batch_size = tf.shape(GT_Batch.n_node)[0]
     psi_coeff=tf.complex(
@@ -129,7 +242,9 @@ def stochastic_energy_tf(psi_new,sampler_var, edge_pairs, GT_Batch,J2):
         Compute the local energy for a single graph in the batch.
         """
         # 1. Generate all Hamiltonian configurations/amplitudes for this graph
-        new_graphs, ham_amplitudes = graph_hamiltonian_jit(gt, edge_pairs, J2)
+        # new_graphs, ham_amplitudes = graph_hamiltonian_jit(gt, edge_pairs, J2)
+
+        new_graphs, ham_amplitudes = graph_hamiltonian_jit_xla(gt, edge_pairs, J2, template_graph)
 
         # 2. Evaluate ψ(s) for original configuration
         # psi_s = sampler_var.evaluate_model(gt)  # Complex scalar

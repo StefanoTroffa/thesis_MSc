@@ -209,7 +209,11 @@ def quimb_vec_to_sparse(vector, configurations, num_sites):
     else:
         # If not complex, create the complex tensor
         ampl_complex = tf.complex(ampl, tf.zeros_like(ampl))
-    
+    print(ampl_complex)
+    print(type(ampl_complex))
+    ampl_complex=tf.cast(ampl_complex, tf.complex64)
+    print(ampl_complex)
+    print(type(ampl_complex))
     # Create the sparse tensor from configurations and complex amplitudes
     sp2 = create_sparsetensor_from_configs_amplitudes(configurations, ampl_complex, num_sites)
     return  tf.sparse.reorder(sp2)

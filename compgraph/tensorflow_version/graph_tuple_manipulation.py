@@ -75,6 +75,44 @@ def precompute_graph_structure(graph: nx.Graph) -> Tuple[tf.Tensor, tf.Tensor, t
     edge_pairs = tf.constant(edges, dtype=tf.int32)
     return senders, receivers, edge_pairs  
 
+# @tf.function(jit_compile=True)
+def update_graph_tuples_config_jit(graph_tuple: GraphsTuple, 
+                                configurations: tf.Tensor) -> GraphsTuple:
+    """Update node configurations while preserving structure (JIT-safe)."""
+    # Ensure static shape and dtype
+    # configurations = tf.ensure_shape(configurations, [5,4])
+    configurations = tf.cast(configurations, graph_tuple.nodes.dtype)
+    # num_nodes_total = graph_tuple.nodes.shape[0]
+
+    # tf.print("configs shape:", tf.shape(configurations))
+    # tf.print("template nodes shape:", tf.shape(graph_tuple.nodes))
+    print(graph_tuple.nodes[:, 1:])
+    # Construct new nodes with original sublattice encoding
+    # tf.debugging.assert_equal(
+    # tf.shape(configurations)[0]*tf.shape(configurations)[1],
+    # tf.shape(graph_tuple.nodes)[0],
+    # message="Mismatch in number of nodes vs configurations")
+    batch_size, num_nodes = configurations.shape
+
+    tf.ensure_shape(configurations, [batch_size, num_nodes])
+    num_nodes_total = graph_tuple.nodes.shape[0]
+
+    flat_configs = tf.reshape(configurations, [num_nodes_total, 1])  # [B * N, 1]
+
+    new_nodes = tf.concat([
+        flat_configs,
+        graph_tuple.nodes[:, 1:]
+    ], axis=1)
+    
+    return GraphsTuple(
+        nodes=new_nodes,
+        edges=graph_tuple.edges,
+        globals=graph_tuple.globals,
+        senders=graph_tuple.senders,
+        receivers=graph_tuple.receivers,
+        n_node=graph_tuple.n_node,
+        n_edge=graph_tuple.n_edge
+    ) 
 @tf.function(jit_compile=True)
 def update_graph_tuple_config_jit(graph_tuple: GraphsTuple, 
                                 config: tf.Tensor) -> GraphsTuple:
@@ -98,7 +136,44 @@ def update_graph_tuple_config_jit(graph_tuple: GraphsTuple,
         n_node=graph_tuple.n_node,
         n_edge=graph_tuple.n_edge
     ) 
-
+@tf.function(jit_compile=False)
+def create_hamiltonian_batch_xla(base_graph: GraphsTuple, new_configs: tf.Tensor) -> GraphsTuple:
+    """XLA-compatible version for creating batched GraphsTuple."""
+    # Get static dimensions from base graph
+    num_nodes_per = base_graph.n_node[0]
+    num_edges_per = base_graph.n_edge[0]
+    batch_size = tf.shape(new_configs)[0]
+    
+    # 1. Construct batched nodes
+    sublattice = tf.expand_dims(base_graph.nodes[:, 1:], 0)
+    sublattice_batch = tf.broadcast_to(sublattice, [batch_size, tf.shape(sublattice)[1], tf.shape(sublattice)[2]])
+    config_with_channel = tf.expand_dims(new_configs, -1)
+    batch_nodes = tf.concat([config_with_channel, sublattice_batch], axis=-1)
+    
+    # 2. Construct batched edges - using tile instead of repeat
+    base_edges = tf.reshape(base_graph.edges, [-1, 1])
+    batch_edges = tf.tile(base_edges, [batch_size, 1])
+    
+    # 3. Construct batched connectivity
+    offsets = tf.range(batch_size, dtype=tf.int32) * num_nodes_per
+    offsets = tf.reshape(offsets, [-1, 1])
+    
+    senders_per = tf.tile(tf.expand_dims(base_graph.senders, 0), [batch_size, 1])
+    receivers_per = tf.tile(tf.expand_dims(base_graph.receivers, 0), [batch_size, 1])
+    
+    batch_senders = tf.reshape(senders_per + offsets, [-1])
+    batch_receivers = tf.reshape(receivers_per + offsets, [-1])
+    
+    # 4. Construct final GraphsTuple
+    return GraphsTuple(
+        nodes=tf.reshape(batch_nodes, [-1, 3]),
+        edges=batch_edges,
+        globals=tf.tile(base_graph.globals, [batch_size, 1]),
+        senders=batch_senders,
+        receivers=batch_receivers,
+        n_node=tf.fill([batch_size], num_nodes_per),
+        n_edge=tf.fill([batch_size], num_edges_per)
+    )
 
 def create_hamiltonian_batch_jit_r1(base_graph: GraphsTuple, new_configs: tf.Tensor) -> GraphsTuple:
     """Create valid GraphsTuple batch matching GT_Batch structure."""
@@ -106,9 +181,9 @@ def create_hamiltonian_batch_jit_r1(base_graph: GraphsTuple, new_configs: tf.Ten
     num_nodes_per = base_graph.n_node[0]
     num_edges_per = base_graph.n_edge[0]
     batch_size = tf.shape(new_configs)[0]
-    print("batch size in create hamiltonian batch jit r1", batch_size)
-    print("num_edges_per in create hamiltonian batch jit r1", num_edges_per)
-    print("num_nodes_per in create hamiltonian batch jit r1", num_nodes_per)
+    # print("batch size in create hamiltonian batch jit r1", batch_size)
+    # print("num_edges_per in create hamiltonian batch jit r1", num_edges_per)
+    # print("num_nodes_per in create hamiltonian batch jit r1", num_nodes_per)
     # 1. Construct batched nodes -------------------------------------------------
     # new_configs: [batch_size, num_nodes]
     # Sublattice features: [num_nodes, 2] → [batch_size, num_nodes, 2]
@@ -124,7 +199,7 @@ def create_hamiltonian_batch_jit_r1(base_graph: GraphsTuple, new_configs: tf.Ten
     # More explicit semantics, works in both modes
     batch_edges = tf.repeat(base_edges, repeats=batch_size, axis=0)
     # batch_edges = tf.tile(base_edges, [batch_size, 1])  # [B*E, F] -> This works for eager execution
-    print("batch_edges shape", batch_edges.shape)
+    # print("batch_edges shape", batch_edges.shape)
     # 3. Construct batched connectivity ------------------------------------------
     # Offset each graph's sender/receiver indices by their position in the batch
     offsets = tf.range(batch_size, dtype=tf.int32) * num_nodes_per
