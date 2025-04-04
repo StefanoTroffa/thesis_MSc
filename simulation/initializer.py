@@ -50,7 +50,7 @@ def initialize_NQS_model_fromhyperparams(ansatz:str, ansatz_params:dict):
     # Mapping of ansatz strings to model constructors
     model_mapping = {
         'GNN2simple': lambda params: GNN_double_output(tf.constant(params['hidden_size']), tf.constant(params['output_emb_size'])),
-        'GNN2adv': lambda params: GNN_double_output_advanced(tf.constant(params['hidden_size']), tf.constant(params['output_emb_size']), tf.constant(params['K_layer'])),
+        'GNN2adv': lambda params: GNN_double_output_advanced(params['hidden_size'], params['output_emb_size'], params['K_layer']),
 }
 
     if ansatz in model_mapping:

@@ -6,7 +6,7 @@ from graph_nets import blocks
 
 # Custom initializer example
 # initializer = tf.keras.initializers.HeNormal()  # He initialization for ReLU
-bias_initializer = tf.keras.initializers.Constant(0.1)  # Small positive value for biases
+bias_initializer = tf.keras.initializers.Constant(0.01)  # Small positive value for biases
 initializer = tf.keras.initializers.GlorotUniform()  # Or TruncatedNormal(stddev=0.02)
 
 
@@ -19,7 +19,17 @@ class MLPModel_glob(snt.Module):
     def __call__(self, inputs):
         out = tf.nn.relu(self.layer1(inputs))
         return out
+# Define the global model with custom initialization
+class MLPModel_globv2(snt.Module):
+    def __init__(self, name=None):
+        super(MLPModel_globv2, self).__init__(name=name)
+        self.layer1 = snt.Linear(output_size=32, name='LinearGloblayer', w_init=initializer)
+        self.layer2 = snt.Linear(output_size=1, name='layer2', w_init=initializer)
 
+    def __call__(self, inputs):
+        x= tf.nn.relu(self.layer1(inputs))
+        out = tf.nn.relu(self.layer2(x))
+        return out
 # Define the encoder model with custom initialization
 class MLPModel_4layers(snt.Module):
     def __init__(self, hidden_layer_size, output_emb_size, name=None):
@@ -42,7 +52,7 @@ class Encoder(snt.Module):
         super(Encoder, self).__init__(name=name)
         self.edge_model = MLPModel_4layers(hidden_layer_size, output_emb_size)
         self.node_model = MLPModel_4layers(hidden_layer_size, output_emb_size)
-        self.global_model = MLPModel_glob()
+        self.global_model = MLPModel_globv2()
 
     def __call__(self, inputs):
         return modules.GraphNetwork(
@@ -57,7 +67,7 @@ class ProcessorLayer(snt.Module):
         super(ProcessorLayer, self).__init__(name=name)
         self.edge_model = MLPModel_4layers(hidden_layer_size, output_emb_size)
         self.node_model = MLPModel_4layers(hidden_layer_size, output_emb_size)
-        self.global_model = MLPModel_glob()
+        self.global_model = MLPModel_globv2()
 
     def __call__(self, inputs):
         updated_graph = modules.GraphNetwork(
@@ -76,7 +86,7 @@ class Decoder(snt.Module):
         super(Decoder, self).__init__(name=name)
         self.edge_model = MLPModel_4layers(hidden_layer_size, output_emb_size)
         self.node_model = MLPModel_4layers(hidden_layer_size, output_emb_size)
-        self.global_model = MLPModel_glob()
+        self.global_model = MLPModel_globv2()
 
     def __call__(self, inputs):
         return modules.GraphNetwork(
@@ -136,10 +146,7 @@ class PoolingLayer_double_batch(snt.Module):
         node_segment_ids = tf.repeat(tf.range(tf.shape(n_node)[0]), n_node)
         edge_segment_ids = tf.repeat(tf.range(tf.shape(n_edge)[0]), n_edge)
 
-        # # Aggregate nodes and edges per graph using segment_sum
-        # pooled_nodes = tf.math.segment_sum(inputs.nodes, node_segment_ids)  # [batch_size, node_feat_dim]
-        # pooled_edges = tf.math.segment_sum(inputs.edges, edge_segment_ids)  # [batch_size, edge_feat_dim]
-        # # Calculate number of segments based on batch size
+
         num_node_segments = tf.shape(n_node)[0]
         num_edge_segments = tf.shape(n_edge)[0]
         # Use unsorted_segment_sum with explicit num_segments
@@ -190,9 +197,10 @@ class GNN_double_output(snt.Module):
 # Define a comprehensive GNN model with custom initialization
 class GNN_double_output_advanced(snt.Module):
     def __init__(self, hidden_layer_size=tf.constant(128), output_emb_size=tf.constant(64), num_layers=tf.constant(1)):
-        super(GNN_double_output_advanced, self).__init__()
+        # super(GNN_double_output_advanced, self).__init__()
+        super().__init__()
         self.encoder = Encoder(hidden_layer_size, output_emb_size)
-        self.processor = ProcessorStack(hidden_layer_size, output_emb_size, tf.constant(num_layers))
+        self.processor = ProcessorStack(hidden_layer_size, output_emb_size, num_layers)
         self.decoder = Decoder(hidden_layer_size, output_emb_size)
         self.pooling_layer = PoolingLayer_double_batch()
     @tf.function(jit_compile=True)

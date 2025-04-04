@@ -174,8 +174,8 @@ def graph_hamiltonian_jit_xla(graph_tuple, edge_pairs, j2, template_graph):
     new_graphs = update_graph_tuples_config_jit(template_graph, all_configs)
 
     return new_graphs, all_amplitudes
-# @tf.function(jit_compile=True)
-# @tf.function(jit_compile=True)
+
+
 @tf.function()
 def stochastic_gradients_tfv3(phi_terms, GT_Batch_update, sampler_var):
         with tf.GradientTape() as tape:
@@ -272,4 +272,6 @@ def stochastic_energy_tf(psi_new,sampler_var, edge_pairs,template_graph, GT_Batc
         fn_output_signature=tf.complex64
     )
     del psi_coeff
-    return tf.reduce_mean(local_energies), local_energies
+    mean_energy=tf.reduce_mean(local_energies)
+    energy_std=tf.sqrt(tf.reduce_mean(tf.abs(local_energies - mean_energy)**2))    
+    return mean_energy, energy_std, local_energies

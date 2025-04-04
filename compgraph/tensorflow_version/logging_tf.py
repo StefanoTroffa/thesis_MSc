@@ -61,7 +61,7 @@ def setup_tensorboard_loggingv2(hyperparams, base_dir="tensorboard_logs"):
     sim_info = f"beta{sim_params.beta}__bs_{sim_params.batch_size}lr{sim_params.learning_rate:.1e}_loop{sim_params.outer_loop}x{sim_params.inner_loop}_{sim_params.gradient}"
     
     # Format ansatz information
-    ansatz_info = f"{hyperparams.ansatz}_h{hyperparams.ansatz_params.get('hidden_size', 0)}_e{hyperparams.ansatz_params.get('output_emb_size', 0)}"
+    ansatz_info = f"{hyperparams.ansatz}_h{hyperparams.ansatz_params.get('hidden_size', 0)}_e{hyperparams.ansatz_params.get('output_emb_size', 0)}_K{hyperparams.ansatz_params.get('K_layer', 0)}"
     
     # Include simulation type (VMC, ExactVMC, etc.)
     sim_type = hyperparams.symulation_type
@@ -283,3 +283,26 @@ def initialize_checkpoint(log_dir, model_var, optimizer):
     initial_checkpoint.save(initial_checkpoint_path)
     print(f"Initial model checkpoint saved to: {initial_checkpoint_path}")
     return checkpoint_manager
+
+
+def load_checkpoint(model, checkpoint_path):
+    """
+    Load a checkpoint into the model.
+    
+    Args:
+        model: The model to load weights into
+        checkpoint_path: Path to the checkpoint
+        
+    Returns:
+        None
+    """
+    # Create a checkpoint object
+    checkpoint = tf.train.Checkpoint(model=model)
+    
+    # Restore the checkpoint
+    status = checkpoint.restore(checkpoint_path)
+    
+    # Wait until the restore is complete
+    status.assert_existing_objects_matched()
+    
+    print(f"Checkpoint loaded from {checkpoint_path}")

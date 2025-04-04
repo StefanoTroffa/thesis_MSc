@@ -2,8 +2,8 @@ import tensorflow as tf
 import networkx as nx
 from graph_nets.graphs import GraphsTuple
 from graph_nets import utils_tf
-def initialize_graph_tuples_tf_opt(n_configs, graph, sublattice_encoding, full_size_hilbert=None):
-    """TensorFlow-compatible version of configuration generation."""
+def initialize_graph_tuples_tf_opt(n_configs, graph, sublattice_encoding, full_size_hilbert=None, sz_sector=None):
+    """TensorFlow-compatible version of configuration generation with optional Sz sector constraint."""
     num_nodes = graph.number_of_nodes()
     
     if full_size_hilbert == 'yes':
@@ -14,11 +14,26 @@ def initialize_graph_tuples_tf_opt(n_configs, graph, sublattice_encoding, full_s
                                               tf.range(num_nodes, dtype=tf.int32)), 1)
         basis_configs = tf.cast(basis_configs, tf.float32) * 2 - 1  # Convert to -1/1
     else:
-        # Generate random configurations using TensorFlow
-        basis_configs = tf.cast(tf.random.uniform((n_configs, num_nodes)) > 0.5, tf.float32) * 2 - 1
+        if sz_sector is not None:
+            # sz_sector should be an integer specifying the number of spin ups
+            # Generate configurations with fixed number of spin ups
+            num_ups = sz_sector
+            num_downs = num_nodes - num_ups
+            
+            # Create arrays of 1s and -1s
+            ups = tf.ones((n_configs, num_ups), dtype=tf.float32)
+            downs = -tf.ones((n_configs, num_downs), dtype=tf.float32)
+            
+            # Concatenate and shuffle each row independently
+            combined = tf.concat([ups, downs], axis=1)
+            batch_indices = tf.tile(tf.expand_dims(tf.range(n_configs), 1), [1, num_nodes])
+            shuffle_indices = tf.stack([batch_indices, tf.argsort(tf.random.uniform([n_configs, num_nodes]))], axis=2)
+            basis_configs = tf.gather_nd(combined, shuffle_indices)
+        else:
+            # Generate random configurations using TensorFlow
+            basis_configs = tf.cast(tf.random.uniform((n_configs, num_nodes)) > 0.5, tf.float32) * 2 - 1
 
     # Create graph tuples with pure TensorFlow operations
-    # print(basis_configs)
     return create_graph_tuples_tf_opt(basis_configs, graph, sublattice_encoding)
 def create_graph_tuples_tf_opt(configs: tf.Tensor, graph: nx.Graph, sublattice_encoding: tf.Tensor, 
                        global_par: float = 0.05, edge_par: float = 0.5) -> GraphsTuple:
