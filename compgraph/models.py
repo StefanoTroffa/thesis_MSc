@@ -181,7 +181,9 @@ class GNN_double_output_single(snt.Module):
     
 class GNN_double_output(snt.Module):
     def __init__(self,hidden_layer_size=tf.constant(128), output_emb_size=tf.constant(64)):
-        super(GNN_double_output, self).__init__()
+        # super(GNN_double_output, self).__init__()
+        super().__init__()
+
         self.encoder = Encoder(hidden_layer_size=hidden_layer_size,output_emb_size=output_emb_size)
         print("Tracing and initializing model ohohoh!") # An eager-only side effect.
         self.pooling_layer = PoolingLayer_double_batch()

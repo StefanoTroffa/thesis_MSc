@@ -61,20 +61,17 @@ def improved_stochastic_gradients(phi_terms, GT_Batch_update, model):
         # diversity_weight = 0.1
         # diversity_loss = -diversity_weight * (amplitude_variance + phase_variance)        
         # Add a small L2 regularization to prevent parameter explosion
-        l2_reg = 1e-5 * sum(tf.reduce_sum(tf.square(w)) for w in model.trainable_variables)
-        regularized_loss = loss + l2_reg 
-        
+        # l2_reg = 1e-5 * sum(tf.reduce_sum(tf.square(w)) for w in model.trainable_variables)
+        # regularized_loss = loss + l2_reg 
+        regularized_loss = loss
+
     # Calculate gradients
     gradients_before = tape.gradient(regularized_loss, model.trainable_variables)
     
     # Clip gradients to prevent explosions
     gradients, grad_norm = tf.clip_by_global_norm(gradients_before, 1.0)
-    # tf.print("psi_norm:", psi_norm, "phi_norm:", phi_norm, "psi_normalized:", tf.norm(psi_normalized), "phi_normalized:", tf.norm(phi_normalized)) 
 
-    # Log diagnostics
-    # tf.print("Overlap:", overlap, "Loss:", loss, "Gradient norm:", grad_norm)
-    
-    return loss, gradients, overlap, grad_norm
+    return loss, gradients_before, overlap, grad_norm
 
 # --- Data Classes ---
 @dataclass(frozen=True)
@@ -96,7 +93,7 @@ class SimParams:
 
 @dataclass
 class Hyperams:
-    symulation_type: str="VMC"
+    simulation_type: str="VMC"
     # symulation_type: str="VMC2spins"    
     # symulation_type: str="ExactSim"
     graph_params: GraphParams=field(default_factory=GraphParams)
@@ -158,7 +155,10 @@ def run_tf_opt_simulation():
     # GT_Batch_update, psi_new=sampler_var.monte_carlo_update_on_batch(GT_Batch_update, 200)
     thermalization_steps=100
     for i in range(thermalization_steps):
-       _, psi_new=sampler_var.monte_carlo_update_on_batchv2(GT_Batch_update, 2)
+       if hyperparams.simulation_type=="VMC2spins":
+            GT_Batch_update, psi_new=sampler_var.monte_carlo_update_on_batchv2(GT_Batch_update, 2)
+       elif hyperparams.simulation_type=="VMC":
+           GT_Batch_update, psi_new=sampler_var.monte_carlo_update_on_batchv2(GT_Batch_update, 2)
 
     del GT_Batch_init
     template_graphs_output=initialize_graph_tuples_tf_opt(tf.shape(edge_pairs)[0]+1,graph,subl)
@@ -221,7 +221,10 @@ def run_tf_opt_simulation():
                 
                 inner_start_time = time.time()  # [Integration] Start timing inner iteration.
                 for i in range(n_sites):
-                    _, psi_new=sampler_var.monte_carlo_update_on_batchv2(GT_Batch_update, 2)
+                    if hyperparams.simulation_type=="VMC2spins":
+                            GT_Batch_update, psi_new=sampler_var.monte_carlo_update_on_batchv2(GT_Batch_update, 2)
+                    elif hyperparams.simulation_type=="VMC":
+                        GT_Batch_update, psi_new=sampler_var.monte_carlo_update_on_batchv2(GT_Batch_update, 2)
 
                 phi_terms=compute_phi_terms(GT_Batch_update, sampler_te)
                 # print(f"phi_terms {phi_terms}, shape {phi_terms.shape}")

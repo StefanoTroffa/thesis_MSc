@@ -64,7 +64,7 @@ def setup_tensorboard_loggingv2(hyperparams, base_dir="tensorboard_logs"):
     ansatz_info = f"{hyperparams.ansatz}_h{hyperparams.ansatz_params.get('hidden_size', 0)}_e{hyperparams.ansatz_params.get('output_emb_size', 0)}_K{hyperparams.ansatz_params.get('K_layer', 0)}"
     
     # Include simulation type (VMC, ExactVMC, etc.)
-    sim_type = hyperparams.symulation_type
+    sim_type = hyperparams.simulation_type
     
     # Combine components into path - using job ID instead of datetime for uniqueness
     log_dir = os.path.join(
@@ -86,7 +86,7 @@ def setup_tensorboard_loggingv2(hyperparams, base_dir="tensorboard_logs"):
     with summary_writer.as_default():
         # Convert dataclasses to dictionaries for logging
         params_dict = {
-            "simulation_type": hyperparams.symulation_type,
+            "simulation_type": hyperparams.simulation_type,
             "graph_params": {k: v for k, v in vars(hyperparams.graph_params).items()},
             "sim_params": {k: v for k, v in vars(hyperparams.sim_params).items()},
             "ansatz": hyperparams.ansatz,

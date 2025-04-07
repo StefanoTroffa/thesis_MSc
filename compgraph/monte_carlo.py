@@ -93,7 +93,7 @@ class MCMCSampler:
         
         return total_amplitude
     
-    @tf.function(jit_compile=True)
+    @tf.function()
     def ite_step(self, new_graphs, all_amplitudes, initial_gt):
         baseline_output = self.evaluate_model(initial_gt)  # Ensure this takes a single graph
 
@@ -329,8 +329,8 @@ class MCMCSampler:
             del proposed_batch, psi_new
 
         return current_batch, current_psi
-    @tf.function(jit_compile=True)
-    def monte_carlo_update_on_batchv2(self, GT_batch: GraphsTuple, N_sweeps: int, use_exchange: bool = True) -> Tuple[GraphsTuple, tf.Tensor]:
+    @tf.function()
+    def monte_carlo_update_on_batchv2(self, GT_batch: GraphsTuple, N_sweeps: int) -> Tuple[GraphsTuple, tf.Tensor]:
         """Vectorized Monte Carlo update for entire batch with option for spin flip or exchange
         
         Args:
@@ -347,7 +347,7 @@ class MCMCSampler:
         del psi
         current_batch = GT_batch
         shape = tf.shape(GT_batch.n_node)[0]
-        print("This is the shape, dummy check for retracing!", shape)
+        # print("This is the shape, dummy check for retracing!", shape)
         
         for _ in range(N_sweeps):
             proposed_batch = self.propose_graph_batch_exchange(current_batch)
