@@ -235,6 +235,8 @@ def log_training_metrics(summary_writer, step, metrics_dict):
     """Log training metrics to TensorBoard"""
     with summary_writer.as_default():
         tf.summary.scalar('training/energy', metrics_dict['energy'], step=step)
+        if 'std_energy' in metrics_dict:
+            tf.summary.scalar('training/std_energy', metrics_dict['std_energy'], step=step)
         if 'magnetization' in metrics_dict:
             tf.summary.scalar('training/magnetization', metrics_dict['magnetization'], step=step)
         if 'overlap' in metrics_dict:

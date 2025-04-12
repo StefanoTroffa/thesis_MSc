@@ -5,10 +5,8 @@ import quimb as qu
 import networkx as nx
 import tensorflow as tf
 import sonnet as snt
-# import line_profiler
-# import atexit
-# profile3 = line_profiler.LineProfiler()
-# atexit.register(profile3.print_stats)
+
+
 def node_to_index(graph):
     nodes_idx = {node: i for i, node in enumerate(graph.nodes)}
     return nodes_idx
@@ -76,6 +74,7 @@ def update_graph_tuple_config(graph_tuple, config, sublattice_encoding):
     
     graph_tuple = graph_tuple.replace(nodes=tf.convert_to_tensor(new_node_features, dtype=tf.float64))
     return graph_tuple
+
 def generate_graph_tuples_configs(graph_tuple, configs):
     graph_tuples=[]
     for config in configs:
@@ -179,8 +178,6 @@ def create_2d_square_graph(lattice_size:tuple):
     G = nx.grid_2d_graph(*lattice_size, periodic=True)
     G = nx.relabel_nodes(G, node_to_index(G))
     return G
-
-
 
 def sparse_to_config(row_index, num_sites):
     """
@@ -289,6 +286,7 @@ def compute_freq_and_amplitudes_from_configurations(configurations, amplitudes):
     sparse_tensor = tf.sparse.SparseTensor(indices=indices_tensor, values=values_tensor, dense_shape=[2**num_sites, 1])
     sparse_tensor_frequency=tf.sparse.SparseTensor(indices=indices_tensor, values=value_frequencies, dense_shape=[2**num_sites, 1])
     return tf.sparse.reorder(sparse_tensor), tf.sparse.reorder(sparse_tensor_frequency)
+
 def create_amplitude_frequencies_from_graph_tuples(graph_tuples, amplitudes):
         
     configurations= graph_tuple_list_to_configs_list(graph_tuples)

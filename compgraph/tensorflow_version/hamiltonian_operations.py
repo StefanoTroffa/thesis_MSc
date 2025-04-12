@@ -175,11 +175,10 @@ def graph_hamiltonian_jit_xla(graph_tuple, edge_pairs, j2, template_graph):
 
     return new_graphs, all_amplitudes
 
-
 @tf.function()
-def stochastic_gradients_tfv3(phi_terms, GT_Batch_update, sampler_var):
+def stochastic_gradients_tfv3(phi_terms, GT_Batch_update, model):
         with tf.GradientTape() as tape:
-            psi = sampler_var.model(GT_Batch_update)
+            psi = model(GT_Batch_update)
             psi_coeff=tf.complex(
                  real=psi[:, 0] * tf.cos(psi[:, 1]),
                  imag=psi[:, 0] * tf.sin(psi[:, 1]))
@@ -188,10 +187,12 @@ def stochastic_gradients_tfv3(phi_terms, GT_Batch_update, sampler_var):
             ratio_phi_psi = tf.stop_gradient(phi_terms / psi_coeff)
             # print(ratio_phi_psi)
             stoch_loss= tf.reduce_mean(log_psi_conj) - tf.reduce_mean(ratio_phi_psi*log_psi_conj)/tf.reduce_mean(ratio_phi_psi)
-            gradients = tape.gradient(tf.math.real(stoch_loss), sampler_var.model.trainable_variables)
+            gradients = tape.gradient(tf.math.real(stoch_loss), model.trainable_variables)
         del tape, psi, psi_coeff, log_psi_conj, ratio_phi_psi
         # del psi_coeff, log_psi_conj, ratio_phi_psi
-        return stoch_loss,  [tf.identity(g) if g is not None else None for g in gradients]
+
+        return stoch_loss,gradients
+
 # @tf.function()
 def stochastic_overlap_gradient(phi_terms, GT_Batch, sampler_var):
     """
@@ -231,41 +232,40 @@ def stochastic_overlap_gradient(phi_terms, GT_Batch, sampler_var):
     return [tf.identity(g) if g is not None else None for g in final_gradients]
 
 @tf.function()
-def stochastic_energy_tf(psi_new,sampler_var, edge_pairs,template_graph, GT_Batch,J2):
+def stochastic_energy_tf(psi_new,model_var, edge_pairs,template_graph, GT_Batch,J2):
 
     batch_size = tf.shape(GT_Batch.n_node)[0]
     psi_coeff=tf.complex(
             psi_new[:,0] * tf.cos( psi_new[:,1] ),
             psi_new[:,0]  * tf.sin( psi_new[:,1] ))
-    def compute_local_energy(gt,i):
+    def compute_local_energy(gt,i,model_var):
         """
-        Compute the local energy for a single graph in the batch.
+        Compute the local energy for a single graph in the batch:
+        1. Generate all Hamiltonian configurations/amplitudes for this graph.
+        2. Evaluate ψ(s) for original configuration.
+        3. Batch evaluate ψ(s') for all H-induced configurations.
+        4. Compute local energy: Σ (ham_coeff * ψ(s')/ψ(s)) 
+        5. Return the local energy.
         """
-        # 1. Generate all Hamiltonian configurations/amplitudes for this graph
-        # new_graphs, ham_amplitudes = graph_hamiltonian_jit(gt, edge_pairs, J2)
 
         new_graphs, ham_amplitudes = graph_hamiltonian_jit_xla(gt, edge_pairs, J2, template_graph)
 
-        # 2. Evaluate ψ(s) for original configuration
-        # psi_s = sampler_var.evaluate_model(gt)  # Complex scalar
         psi_s=psi_coeff[i]
-        # print(psi_s, psi_sv2)
-        # 3. Batch evaluate ψ(s') for all H-induced configurations
-        model_outputs = sampler_var.model(new_graphs)  # [num_configs, 2]
+
+        model_outputs = model_var(new_graphs)  
         amplitudes = model_outputs[:, 0]
         phases = model_outputs[:, 1]
         psi_s_prime = tf.complex(
             amplitudes * tf.cos(phases),
             amplitudes * tf.sin(phases))
 
-        # 4. Compute local energy: Σ (ham_coeff * ψ(s')/ψ(s)) 
         ratios = psi_s_prime / psi_s
         ham_amplitudes = tf.cast(ham_amplitudes, tf.complex64)
         # del psi_s, psi_s_prime
         return tf.reduce_sum(ham_amplitudes * ratios)
     def single_graph_energy(i):
         single_graph = get_single_graph_from_batch(GT_Batch, i)
-        return compute_local_energy(single_graph,i)
+        return compute_local_energy(single_graph,i,model_var)
     local_energies = tf.map_fn(
         single_graph_energy,
             tf.range(batch_size),

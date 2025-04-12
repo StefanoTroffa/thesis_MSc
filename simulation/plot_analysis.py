@@ -14,6 +14,47 @@ import argparse
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
+def extract_configs_as_indices(GT_batch):
+    """
+    Extract configurations from GraphTuple and convert to integer indices
+    for comparison with the full Hilbert space.
+    """
+    # Extract spin configurations (assuming they're in the first column of nodes)
+    configs = tf.reshape(GT_batch.nodes[:, 0], (-1, GT_batch.n_node[0]))
+    
+    # Convert from [-1,1] format to [0,1] format
+    configs_01 = tf.cast((configs + 1) / 2, tf.int32)
+    
+    # Convert each configuration to an integer index in the Hilbert space
+    # Using binary representation: each config maps to a unique integer
+    indices = tf.zeros(tf.shape(configs)[0], dtype=tf.int32)
+    
+    for i in range(tf.shape(configs)[1]):
+        bit_value = tf.cast(configs_01[:, i], tf.int32) * (2 ** i)
+        indices += bit_value
+    
+    return indices
+def get_prob_amplitudes_from_mc_sampling(GT_batch_mc,num_nodes, model_w, sampler_var, GT_batch_complete, n_samples=500):
+    """
+    Extract the probability amplitudes from the Monte Carlo sampling.
+    """
+    num_bins = 2 ** num_nodes
+    # Create a histogram (count per configuration index)
+    hist_counts = np.zeros(num_bins)
+
+    for i in range(n_samples):
+        for l in range(num_nodes):
+            GT_batch_mc, psi_coeff=sampler_var.monte_carlo_update_on_batch(model_w,GT_batch_mc)
+
+        config_indices_np=extract_configs_as_indices(GT_batch_mc).numpy()
+        for idx in config_indices_np:
+            hist_counts[idx] += 1
+    if not GT_batch_complete is None:
+        psi_model=model_w(GT_batch_complete)
+        prob_ampl=tf.abs(tf.complex(psi_model[:,0] * tf.cos(psi_model[:,1]),psi_model[:,0] * tf.sin(psi_model[:,1])))**2
+        prob_coeff=prob_ampl/tf.reduce_sum(prob_ampl)
+    return hist_counts, prob_coeff
+
 
 def plot_data(df, column, title, xlabel, ylabel):
     plt.figure()
