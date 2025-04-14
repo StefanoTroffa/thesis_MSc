@@ -50,3 +50,6 @@ tests/logs/*
 tests/cluster_data/*    
 tests/*/*.png
 tests/**/*DESK*
+.env
+tensorboard_logs/
+xla_debug_dumps/

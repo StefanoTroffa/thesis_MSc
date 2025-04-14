@@ -9,7 +9,8 @@ import time
 import datetime
 import gc
 
-from compgraph.tensorflow_version.hamiltonian_operations import stochastic_gradients_tfv3, stochastic_energy_tf
+from compgraph.tensorflow_version.hamiltonian_operations import stochastic_gradients_tfv3
+from compgraph.tensorflow_version.hamiltonian_operations import stochastic_energy_tf
 from compgraph.tensorflow_version.logging_tf import log_gradient_norms, setup_tensorboard_logging
 from simulation.initializer import create_graph_from_ham, initialize_NQS_model_fromhyperparams, initialize_graph_tuples, initialize_hamiltonian_and_groundstate
 from compgraph.tensorflow_version.graph_tuple_manipulation import initialize_graph_tuples_tf_opt, precompute_graph_structure
@@ -49,12 +50,19 @@ def log_weights_and_nan_check(step, model, writer):
             tf.summary.histogram(f"weights/{var.name}", var, step=step)
             nan_count = tf.reduce_sum(tf.cast(tf.math.is_nan(var), tf.int32))
             tf.summary.scalar(f"nan_count/{var.name}", nan_count, step=step)
+<<<<<<< HEAD
+=======
+            zero_count = tf.reduce_sum(tf.cast(tf.equal(var, 0.0), tf.int32))
+            tf.summary.scalar(f"zero_count/{var.name}", zero_count, step=step)
+            
+>>>>>>> 423bfc5ecfd98fceffd1621ecc2e4af175719e60
 # --- Data Classes ---
 @dataclass(frozen=True)
 class GraphParams:
     graphType: str="2dsquare"
     n:int =2
     m: int=2
+<<<<<<< HEAD
     sublattice: str = "Neel"
 
 @dataclass(frozen=True)
@@ -62,6 +70,16 @@ class SimParams:
     beta: float = 0.05
     batch_size: int =128
     learning_rate: float= 7e-6
+=======
+    # sublattice: str = "Neel"
+    sublattice: str ="Disordered"
+
+@dataclass(frozen=True)
+class SimParams:
+    beta: float = 0.07
+    batch_size: int =512
+    learning_rate: float= 7e-3
+>>>>>>> 423bfc5ecfd98fceffd1621ecc2e4af175719e60
     outer_loop:int=60
     inner_loop:int=8
 
@@ -71,7 +89,11 @@ class Hyperams:
     graph_params: GraphParams=field(default_factory=GraphParams)
     sim_params: SimParams = field(default_factory=SimParams)
     ansatz: str = "GNN2simple"
+<<<<<<< HEAD
     ansatz_params: dict = field(default_factory=lambda: {"hidden_size": 128, "output_emb_size": 64})
+=======
+    ansatz_params: dict = field(default_factory=lambda: {"hidden_size": 64, "output_emb_size": 32})
+>>>>>>> 423bfc5ecfd98fceffd1621ecc2e4af175719e60
 
 
 
@@ -118,7 +140,11 @@ def run_tf_opt_simulation():
     print(f"tensorboard --logdir {log_dir}")
 
     physical_devices = tf.config.list_physical_devices('GPU')
+<<<<<<< HEAD
     tf.summary.trace_on(graph=True, profiler=True, profiler_outdir=log_dir)
+=======
+    # tf.summary.trace_on(graph=True, profiler=True, profiler_outdir=log_dir)
+>>>>>>> 423bfc5ecfd98fceffd1621ecc2e4af175719e60
     GT_Batch_update=GT_Batch_init
     del GT_Batch_init
     with summary_writer.as_default():
@@ -222,6 +248,10 @@ def run_tf_opt_simulation():
 if __name__ == "__main__":
     gpus = tf.config.list_physical_devices('GPU')
     # tf.config.run_functions_eagerly(True)
+<<<<<<< HEAD
+=======
+    # with tf.device('/GPU:0'):
+>>>>>>> 423bfc5ecfd98fceffd1621ecc2e4af175719e60
     run_tf_opt_simulation()    
     # Enable XLA debugging options
     # os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=2 --tf_xla_cpu_only"
