@@ -275,3 +275,33 @@ def stochastic_energy_tf(psi_new,model_var, edge_pairs,template_graph, GT_Batch,
     mean_energy=tf.reduce_mean(local_energies)
     energy_std=tf.sqrt(tf.reduce_mean(tf.abs(local_energies - mean_energy)**2))    
     return mean_energy, energy_std, local_energies
+
+
+
+def compute_staggered_magnetization(spins, stagger_factor, num_sites):
+    """
+    Compute the staggered magnetization for a batch of graphs.
+    
+    Parameters:
+    -----------
+    spins : tf.Tensor
+        Tensor of shape (B, N) containing spin configurations.
+    stagger_factor : tf.Tensor
+        Tensor of shape (B, N) containing the staggered factor for each spin.
+    
+    Returns:
+    --------
+    Mstag : tf.Tensor
+        Staggered magnetization for each graph in the batch.
+    """
+    # Compute the staggered magnetization
+    staggered_2d = spins * stagger_factor
+    Mstag_each_graph = tf.reduce_sum(staggered_2d, axis=1) / tf.cast(num_sites, tf.float32)
+
+    # take absolute value => shape (B,)
+    abs_each_graph = tf.abs(Mstag_each_graph)
+
+    # if you want the overall average across the batch
+    abs_Mstag_mean = tf.reduce_mean(abs_each_graph)
+    
+    return abs_Mstag_mean

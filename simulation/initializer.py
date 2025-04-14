@@ -36,28 +36,39 @@ def format_hyperparams_to_string(hyperparams):
     return '_'.join(parts)
 
 
-def initialize_NQS_model_fromhyperparams(ansatz:str, ansatz_params:dict):
+# Update the model initialization function
+def initialize_NQS_model_fromhyperparams(ansatz:str, ansatz_params:dict, seed=None):
     """
     Initialize the model based on the provided ansatz and its parameters.
-
+    
     Args:
-    - ansatz (str): A string indicating the type of model (ansatz) to initialize.
-    - ansatz_params (dict): A dictionary of parameters for the ansatz.
-
+        ansatz (str): A string indicating the type of model (ansatz) to initialize.
+        ansatz_params (dict): A dictionary of parameters for the ansatz.
+        seed (int, optional): Random seed for weight initialization.
+        
     Returns:
-    - An instance of the specified model.
+        An instance of the specified model.
     """
     # Mapping of ansatz strings to model constructors
     model_mapping = {
-        'GNN2simple': lambda params: GNN_double_output(tf.constant(params['hidden_size']), tf.constant(params['output_emb_size'])),
-        'GNN2adv': lambda params: GNN_double_output_advanced(tf.constant(params['hidden_size']), tf.constant(params['output_emb_size']), tf.constant(params['K_layer'])),
-}
+        'GNN2simple': lambda params, seed: GNN_double_output(
+            tf.constant(params['hidden_size']), 
+            tf.constant(params['output_emb_size']),
+            seed=seed
+        ),
+        'GNN2adv': lambda params, seed: GNN_double_output_advanced(
+            tf.constant(params['hidden_size']), 
+            tf.constant(params['output_emb_size']), 
+            tf.constant(params['K_layer']),
+            seed=seed
+        ),
+    }
 
     if ansatz in model_mapping:
-        return model_mapping[ansatz](ansatz_params)
+        return model_mapping[ansatz](ansatz_params, seed)
     else:
         available_models = ', '.join(model_mapping.keys())
-        raise ValueError(f"This model cannot be initialized. The available models are: {available_models}")
+        raise ValueError(f"This model cannot be initialized. Available models: {available_models}")
 
 
 def neel_state(graph):

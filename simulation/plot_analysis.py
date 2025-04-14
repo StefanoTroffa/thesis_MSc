@@ -54,6 +54,69 @@ def get_prob_amplitudes_from_mc_sampling(GT_batch_mc,num_nodes, model_w, sampler
         prob_ampl=tf.abs(tf.complex(psi_model[:,0] * tf.cos(psi_model[:,1]),psi_model[:,0] * tf.sin(psi_model[:,1])))**2
         prob_coeff=prob_ampl/tf.reduce_sum(prob_ampl)
     return hist_counts, prob_coeff
+def plot_energy_evolution(energy_values, std_values, batch_size, save_path=None):
+    """
+    Plot energy evolution over training with standard deviation.
+    
+    Parameters:
+    -----------
+    energy_values : list or array
+        Energy values for each iteration
+    std_values : list or array
+        Standard deviation of energy at each iteration
+    batch_size : int
+        Batch size used in training
+    samples : int
+        Number of samples
+    save_path : str, optional
+        Path to save the figure
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Create iterations array
+    iterations = np.arange(len(energy_values))
+    
+    # Plot energy values
+    ax.plot(iterations, energy_values, 'o-', color='#1f77b4', markersize=1, 
+            label='Energy Samples', alpha=0.4, linewidth=2)
+    
+    # Add shaded region for energy variance
+    ax.fill_between(iterations, 
+                    np.array(energy_values) - np.array(std_values),
+                    np.array(energy_values) + np.array(std_values),
+                    color='#ff7f0e', alpha=0.8,
+                    label='Energy ± Std Dev')
+    
+    # Set labels and title
+    ax.set_title(f'Energy Evolution during training for Batch Size: {batch_size}', 
+                fontsize=14, fontweight='bold')
+    ax.set_xlabel('Training Iterations', fontsize=12)
+    ax.set_ylabel('Energy', fontsize=12)
+    ax.grid(True, linestyle='--', alpha=0.6)
+    ax.legend(loc='best', framealpha=0.7)
+    
+    # Add text box with simulation summary
+    textstr = '\n'.join((
+        f'Batch Size: {batch_size}',
+        f'Final Energy: {energy_values[-1]:.6f}'
+    ))
+    
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax.text(0.03, 0.03, textstr, transform=ax.transAxes, fontsize=10,
+            verticalalignment='bottom', bbox=props)
+    
+    # Ensure good layout
+    plt.tight_layout()
+    
+    # Save if path provided
+    if save_path:
+        plt.savefig(save_path, dpi=300)
+    
+    return fig, ax
 
 
 def plot_data(df, column, title, xlabel, ylabel):

@@ -99,6 +99,7 @@ def extract_hyperparams_from_path(path: str) -> Hyperparams:
         ansatz_params=ansatz_params
     )
 
+# Update the model checking function
 def check_and_reinitialize_model(model, GT_Batch, hyperparams, tolerance=0.01, max_attempts=5):
     """
     Check if all outputs from the model on the batch are too similar (within tolerance range).
@@ -108,8 +109,6 @@ def check_and_reinitialize_model(model, GT_Batch, hyperparams, tolerance=0.01, m
         model: The neural network model
         GT_Batch: Graph tuple batch input
         hyperparams: Hyperparameters object
-        graph: Graph structure
-        subl: Sublattice information
         tolerance: Allowed variation between outputs (as a fraction, default 0.01 or 1%)
         max_attempts: Maximum number of reinitialization attempts
         
@@ -120,29 +119,35 @@ def check_and_reinitialize_model(model, GT_Batch, hyperparams, tolerance=0.01, m
     outputs = model(GT_Batch)
     
     # Calculate mean output and check variation
-    mean_output = tf.reduce_mean(outputs)
     mean_output = tf.reduce_mean(outputs[:,0]), tf.reduce_mean(outputs[:,1])
-    std_output= tf.math.reduce_std(outputs[:,0]), tf.math.reduce_std(outputs[:,1])
+    std_output = tf.math.reduce_std(outputs[:,0]), tf.math.reduce_std(outputs[:,1])
 
-    max_deviation = tf.reduce_max(tf.abs(outputs - mean_output))
-    relative_deviation = max_deviation / (tf.abs(mean_output) + 1e-10)  # Add small epsilon to avoid division by zero
     print("Ciao first trial seconmd")
     attempt = 0
     print(f"Initial std: {std_output[0]:.6f} (tolerance: {tolerance}), attempt: {attempt}/{max_attempts},{(tf.reduce_sum(std_output)) < tolerance}")
+    
     # Keep reinitializing until we get diverse outputs or hit max attempts
-    while (std_output[0] < tolerance or std_output[1]<tolerance) and attempt < max_attempts:
+    while (std_output[0] < tolerance or std_output[1] < tolerance) and attempt < max_attempts:
         attempt += 1
-        print(f"WARNING: Model outputs too similar {std_output[0]:.6f} Reinitializing model (attempt {attempt}/{max_attempts})...")
+        
+        # Generate a new random seed for this initialization
+        seed = tf.random.uniform([], minval=0, maxval=1000000, dtype=tf.int32)
+        print(f"WARNING: Model outputs too similar {std_output[0]:.6f} Reinitializing model with seed {seed} (attempt {attempt}/{max_attempts})...")
         
         # Delete the current model to free memory
         del model
         
-        # Reinitialize the model
-        model_new = initialize_NQS_model_fromhyperparams(hyperparams.ansatz, hyperparams.ansatz_params)
+        # Reinitialize the model with a new random seed
+        model_new = initialize_NQS_model_fromhyperparams(
+            hyperparams.ansatz, 
+            hyperparams.ansatz_params,
+            seed=seed
+        )
         
         # Initialize the new model with a forward pass
         model_new(GT_Batch)
         print(model_new(GT_Batch)[0])
+        
         # Replace the old model
         model = model_new
         
@@ -151,9 +156,8 @@ def check_and_reinitialize_model(model, GT_Batch, hyperparams, tolerance=0.01, m
         
         # Check again
         outputs = model(GT_Batch)
-        std_output= tf.math.reduce_std(outputs[:,0]), tf.math.reduce_std(outputs[:,1])
+        std_output = tf.math.reduce_std(outputs[:,0]), tf.math.reduce_std(outputs[:,1])
 
-    
     if attempt > 0:
         if tf.reduce_sum(std_output) < tolerance:
             print(f"WARNING: Model still producing too similar outputs after {attempt} reinitialization attempts! (std deviation: {std_output[0]:.6f}, {std_output[1]:.6f})")
