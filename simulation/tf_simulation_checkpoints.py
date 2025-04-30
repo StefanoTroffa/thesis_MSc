@@ -9,12 +9,11 @@ import time
 import datetime
 import gc
 from compgraph.tensorflow_version.hamiltonian_operations import stochastic_gradients_tfv3,stochastic_overlap_gradient,stochastic_energy_tf, compute_staggered_magnetization
-from compgraph.tensorflow_version.logging_tf import log_gradient_norms, setup_tensorboard_loggingv2, initialize_checkpoint
+from compgraph.tensorflow_version.logging_tf import log_gradient_norms, setup_tensorboard_loggingv2, initialize_checkpoint, log_training_metrics, log_weights_and_nan_check      
 from simulation.initializer import create_graph_from_ham, initialize_NQS_model_fromhyperparams, initialize_graph_tuples, initialize_hamiltonian_and_groundstate
 from compgraph.tensorflow_version.graph_tuple_manipulation import initialize_graph_tuples_tf_opt, precompute_graph_structure
 from compgraph.monte_carlo import MCMCSampler,compute_phi_terms
 from compgraph.useful import copy_to_non_trainable
-from compgraph.tensorflow_version.logging_tf import log_training_metrics, log_weights_and_nan_check         
 from compgraph.tensorflow_version.model_loading import check_and_reinitialize_model
 
 from compgraph.tensorflow_version.memory_control import aggressive_memory_cleanup, count_tf_objects, inspect_tf_functions
@@ -23,19 +22,25 @@ from compgraph.tensorflow_version.memory_control import aggressive_memory_cleanu
 @dataclass(frozen=True)
 class GraphParams:
     graphType: str="2dsquare"
-    n:int =7
-    m: int=7
+    n:int =3
+    m: int=3
     # sublattice: str = "Disordered"
-    sublattice: str ="Neel"
+    sublattice: str = "Alternatepattern"
+    # sublattice: str ="Neel"
 
 @dataclass(frozen=True)
 class SimParams:
-    beta: float = 0.007
-    batch_size: int =128
-    learning_rate: float= 2e-4 
-    outer_loop:int=2048
-    inner_loop:int=30
+    beta: float = 0.08
+    batch_size: int = 256
+    learning_rate: float= 2e-4
+    outer_loop:int=1269
+    inner_loop:int=20
     gradient:str='overlap'
+    seed=860432
+    # seed that works on 3x3
+    # seed=860432
+    # seed that works on 4x4
+    # seed=860432
 
 @dataclass
 class Hyperams:
@@ -44,10 +49,27 @@ class Hyperams:
     # symulation_type: str="ExactSim"
     graph_params: GraphParams=field(default_factory=GraphParams)
     sim_params: SimParams = field(default_factory=SimParams)
-    ansatz: str = "GNN2adv"
-    ansatz_params: dict = field(default_factory=lambda: {"hidden_size": 128, "output_emb_size": 64, 'K_layer': 4})
-
-
+    # ansatz: str = "GNN2adv"
+    ansatz: str = "GNNprocnorm"
+    ansatz_params: dict = field(default_factory=lambda: {"hidden_size": 128, "output_emb_size": 64, 'K_layer':1})
+    
+    # ansatz: str = "GNN2simple"
+    # ansatz_params: dict = field(default_factory=lambda: {"hidden_size": 128, "output_emb_size": 64})
+def batch_staggered_metrics_pm1(spins_pm1, eps_pm1):
+    """
+    spins_pm1:  (B, N) tf.float32, values ±1
+    eps_pm1:    (N,)   tf.float32, values ±1
+    Returns dict with m_rms, m_abs, S_pp
+    """
+    spins = tf.convert_to_tensor(spins_pm1, tf.float32)
+    eps   = tf.convert_to_tensor(eps_pm1,   tf.float32)
+    N     = tf.cast(tf.shape(spins)[1], tf.float32)
+    Ms    = tf.reduce_sum(spins * eps[None,:], axis=1)
+    Ms2   = tf.reduce_mean(tf.square(Ms))      
+    m_rms = tf.sqrt(Ms2) / N
+    m_abs = tf.reduce_mean(tf.abs(Ms)) / N
+    S_pp  = Ms2 / N
+    return m_rms, m_abs, S_pp
 
 def run_tf_opt_simulation():
     energies = []
@@ -58,13 +80,17 @@ def run_tf_opt_simulation():
     # Initialization of hyperparameters, graph, and models.
     # =====================================================
     hyperparams = Hyperams()
-    graph, subl = create_graph_from_ham(
-        hyperparams.graph_params.graphType,
+    graph, subl = create_graph_from_ham(hyperparams.graph_params.graphType,
         (hyperparams.graph_params.n, hyperparams.graph_params.m),
+       
         hyperparams.graph_params.sublattice
     )
-    
+
     n_sites = hyperparams.graph_params.n * hyperparams.graph_params.m
+    if n_sites%2==0:
+        _, subl_for_stagger= create_graph_from_ham(hyperparams.graph_params.graphType,
+            (hyperparams.graph_params.n, hyperparams.graph_params.m),
+            "Neel")    
     if n_sites%2==0:
         lowest_eigenstate_as_sparse = initialize_hamiltonian_and_groundstate(
             hyperparams.graph_params,
@@ -72,12 +98,13 @@ def run_tf_opt_simulation():
         ) if n_sites < 17 else None
     else: 
         lowest_eigenstate_as_sparse=None
-    model_w = initialize_NQS_model_fromhyperparams(hyperparams.ansatz, hyperparams.ansatz_params)
-    model_fix = initialize_NQS_model_fromhyperparams(hyperparams.ansatz, hyperparams.ansatz_params)
+    model_w = initialize_NQS_model_fromhyperparams(hyperparams.ansatz, hyperparams.ansatz_params, hyperparams.sim_params.seed)
+    model_fix = initialize_NQS_model_fromhyperparams(hyperparams.ansatz, hyperparams.ansatz_params, hyperparams.sim_params.seed)
     GT_Batch_init=initialize_graph_tuples_tf_opt(hyperparams.sim_params.batch_size, graph, subl)
     model_w(GT_Batch_init)
-    
-    model_w=check_and_reinitialize_model(model_w, GT_Batch_init, hyperparams, tolerance=0.4, max_attempts=50)
+    tollerance_param=0.2
+    model_w,final_seed=check_and_reinitialize_model(model_w, GT_Batch_init, hyperparams, tolerance=tollerance_param, max_attempts=500, seed=hyperparams.sim_params.seed)
+    seed_to_save=final_seed 
     optimizer=snt.optimizers.Adam(hyperparams.sim_params.learning_rate,0.9,0.99)
     senders, receivers, edge_pairs=precompute_graph_structure(graph)
     model_fix(GT_Batch_init)
@@ -98,27 +125,34 @@ def run_tf_opt_simulation():
     physical_devices = tf.config.list_physical_devices('GPU')
     time_start= time.time()  # [Integration] Start timing the entire simulation.
     GT_Batch_update=GT_Batch_init
-    thermalization_steps=5000
+    thermalization_steps=500*n_sites
     for i in range(thermalization_steps):
        if hyperparams.simulation_type=="VMC2spins":
             GT_Batch_update, psi_new=sampler_var.monte_carlo_update_on_batchv2(model_w,GT_Batch_update)
        elif hyperparams.simulation_type=="VMC":
-           GT_Batch_update, psi_new=sampler_var.monte_carlo_update_on_batch(model_w,GT_Batch_update)
+            # GT_Batch_update, psi_new=sampler_var.monte_carlo_update_on_batch(model_w,GT_Batch_update)
+
+           GT_Batch_update, psi_new=sampler_var.monte_carlo_update_on_batch_profilemem(model_w,GT_Batch_update)
     tf.print(f"Thermalization completed in {time.time()-time_start:.2f} seconds.")
     del GT_Batch_init
 
     #=========================================
     template_graphs_output=initialize_graph_tuples_tf_opt(tf.shape(edge_pairs)[0]+1,graph,subl)
-    subl_idx = tf.argmax(subl, axis=1)  # shape (N,)
-    stagger_factor_single = tf.where(subl_idx == 0, 1.0, -1.0)
-    stagger_factor_batch = tf.tile(stagger_factor_single, multiples=[hyperparams.sim_params.batch_size])
-    stagger_2d = tf.reshape(stagger_factor_batch, (hyperparams.sim_params.batch_size, n_sites))
-
+    if n_sites%2==0:  
+        subl_idx = tf.argmax(subl_for_stagger, axis=1)  # shape (N,)
+        stagger_factor_single = tf.where(subl_idx == 0, 1.0, -1.0)
+        stagger_factor_batch = tf.tile(stagger_factor_single, multiples=[hyperparams.sim_params.batch_size])
+        stagger_2d = tf.reshape(stagger_factor_batch, (hyperparams.sim_params.batch_size, n_sites))
+    else:
+        stagger_factor_single = tf.ones((n_sites,), dtype=tf.float32)
+        stagger_factor_batch = tf.tile(stagger_factor_single, multiples=[hyperparams.sim_params.batch_size])
+        stagger_2d = tf.reshape(stagger_factor_batch, (hyperparams.sim_params.batch_size, n_sites))
     # =======================================
-
+    ## We are now saving the seed value of model initialization as a text in tensorflow events. 
     with summary_writer.as_default():
         tf.summary.text('configuration/hyperparameters', 
-                    f'beta: {hyperparams.sim_params.beta}\nlearning_rate: {hyperparams.sim_params.learning_rate}\n', 
+                    f'beta: {hyperparams.sim_params.beta}\nlearning_rate: {hyperparams.sim_params.learning_rate}\nseed: {seed_to_save}\n',
+
                     step=0)
 
         for step in range(hyperparams.sim_params.outer_loop):
@@ -141,7 +175,7 @@ def run_tf_opt_simulation():
             # Checkpointing and memory cleanup
             if step % 30 == 0 and step > 0:
                 # aggressive_memory_cleanup()
-                tf.keras.backend.clear_session()
+                # tf.keras.backend.clear_session()
                 gc.collect()
                 log_weights_and_nan_check(step, model_w, summary_writer)
                 checkpoint_path = checkpoint_manager.save()
@@ -162,7 +196,9 @@ def run_tf_opt_simulation():
                     if hyperparams.simulation_type == "VMC2spins":
                         GT_Batch_update, psi_new = sampler_var.monte_carlo_update_on_batchv2(model_w, GT_Batch_update)
                     elif hyperparams.simulation_type == "VMC":
-                        GT_Batch_update, psi_new = sampler_var.monte_carlo_update_on_batch(model_w, GT_Batch_update)
+                        # GT_Batch_update, psi_new=sampler_var.monte_carlo_update_on_batch(model_w,GT_Batch_update)
+
+                        GT_Batch_update, psi_new = sampler_var.monte_carlo_update_on_batch_profilemem(model_w, GT_Batch_update)
                 timing_metrics['mc_duration'] = time.time() - mc_start
                 
                 # Phi terms computation
@@ -187,9 +223,12 @@ def run_tf_opt_simulation():
                 
                 # Calculate magnetization
                 spins = GT_Batch_update.nodes[:, 0]
+
+                spins_2d = tf.reshape(spins, (hyperparams.sim_params.batch_size, n_sites))
+                m_rms, m_abs, S_pp=batch_staggered_metrics_pm1(
+                    spins_2d, stagger_factor_single)
                 avg_spin = tf.reduce_mean(spins)
                 timing_metrics['inner_step_duration'] = time.time() - inner_start_time
-                spins_2d = tf.reshape(spins, (hyperparams.sim_params.batch_size, n_sites))
                 avg_staggered_abs_magnetization = compute_staggered_magnetization(spins_2d, stagger_2d,n_sites)
                 # Collect training metrics
                 training_metrics = {
@@ -198,7 +237,9 @@ def run_tf_opt_simulation():
                     'std_energy': std_energy/tf.math.sqrt(tf.cast(loc_energies.shape[0], tf.float32)),
                     'magnetization': avg_spin,
                     'staggered_magnetization_abs': avg_staggered_abs_magnetization,
-                    
+                    'staggered_magnetization_sqrt': m_rms,
+                    'staggered_magnetization_absv2': m_abs,
+                    'staggered_magnetization_S_pp': S_pp,
                 }
                 
                 # Store metrics for outer loop logging
@@ -225,7 +266,7 @@ def run_tf_opt_simulation():
                         tf.summary.text('notes/custom_message', 
                                     f"Outer step {step} completed", step=step)
                      # Log gradient norms periodically
-                    if step % 5 == 0:
+                    if (step % 30 == 0 and innerstep == 0):
                         log_gradient_norms(global_step, stoch_grads, summary_writer)
                 # Clean up temporary variables
                 del stoch_loss, stoch_grads, energy, loc_energies, spins, avg_spin, avg_staggered_abs_magnetization

@@ -100,7 +100,7 @@ def extract_hyperparams_from_path(path: str) -> Hyperparams:
     )
 
 # Update the model checking function
-def check_and_reinitialize_model(model, GT_Batch, hyperparams, tolerance=0.01, max_attempts=5):
+def check_and_reinitialize_model(model, GT_Batch, hyperparams, tolerance=0.01, max_attempts=5, seed=None):
     """
     Check if all outputs from the model on the batch are too similar (within tolerance range).
     If so, reinitialize the model until we get diverse outputs or hit max attempts.
@@ -163,8 +163,8 @@ def check_and_reinitialize_model(model, GT_Batch, hyperparams, tolerance=0.01, m
             print(f"WARNING: Model still producing too similar outputs after {attempt} reinitialization attempts! (std deviation: {std_output[0]:.6f}, {std_output[1]:.6f})")
         else:
             print(f"Model successfully reinitialized with diverse outputs. (std deviation: {tf.reduce_sum(std_output):.6f})")
-    
-    return model
+    seed_val= seed if tf.reduce_sum(std_output) > tolerance else -1
+    return model, seed_val
 def explore_model(model):
     """
     Explore the variable structure of a Sonnet model.
