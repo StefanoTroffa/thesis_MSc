@@ -328,14 +328,51 @@ class MCMCSampler:
         del proposed_batch, psi_new
 
         return current_batch, current_psi
+    
+    # @tf.function()
+    def monte_carlo_update_on_batch_profilemem(self, model, GT_batch_input: GraphsTuple) -> Tuple[GraphsTuple, tf.Tensor]:
+        # ... initial setup ...
+        shape=tf.shape(GT_batch_input.n_node)[0]
+        # print("This is the shape, dummy check for retracing!",shape) # Retracing check
+
+        # --- Monitor initial model call ---
+        # tf.config.experimental.reset_memory_stats('GPU:0')
+        psi = model(GT_batch_input)
+        current_psi = psi
+        del psi
+        current_batch=GT_batch_input
+        proposed_batch = self.propose_graph_batch(current_batch)
+        psi_new_proposed = model(proposed_batch)
+
+        p_accept = self.calculate_acceptance_prob(current_psi, psi_new_proposed)
+
+        # Create acceptance mask
+        rand_vals = tf.random.uniform(
+            shape=[shape], 
+            dtype=tf.float32
+        )
+        accept_mask = rand_vals < p_accept
+
+        current_batch = self.update_batch_with_mask(current_batch,proposed_batch,accept_mask)
+        # Update current psi values
+        current_psi = tf.where(
+            accept_mask[:, tf.newaxis], 
+            psi_new_proposed, 
+            current_psi
+        )
+        del proposed_batch, psi_new_proposed
+        # Final memory check
+        # mem_info_final = tf.config.experimental.get_memory_info('GPU:0')
+        # tf.print("TF Mem Final: Current=", mem_info_final['current'] / (1024*1024), "MiB, Peak=", mem_info_final['peak'] / (1024*1024), "MiB")
+        return current_batch, current_psi
+
     @tf.function()
     def monte_carlo_update_on_batchv2(self,model, GT_batch: GraphsTuple) -> Tuple[GraphsTuple, tf.Tensor]:
-        """Vectorized Monte Carlo update for entire batch with option for spin flip or exchange
+        """Vectorized Monte Carlo update for entire batch with spin exchange
         
         Args:
             GT_batch: Input batch of graphs
             N_sweeps: Number of Monte Carlo sweeps
-            use_exchange: If True, use spin exchange; if False, use spin flip
         
         Returns:
             Updated batch and corresponding wave function amplitudes

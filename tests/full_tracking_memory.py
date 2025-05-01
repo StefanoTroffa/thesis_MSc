@@ -1,4 +1,22 @@
+import os# Turn off XLA entirely
+# os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices=false'
+
 import tensorflow as tf
+tf.keras.backend.clear_session()
+
+# Also make sure the JIT optimizer is off
+# tf.config.optimizer.set_jit(False)
+gpus = tf.config.experimental.list_physical_devices('GPU')
+for gpu in gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        print(f"GPU memory growth enabled on {len(gpus)} devices")
+    except RuntimeError as e:
+        print(f"GPU memory growth setting failed: {e}")
+
+print("JIT enabled? ", tf.config.optimizer.get_jit())        # should be False
+
 import numpy as np
 import gc
 import psutil
@@ -13,22 +31,16 @@ from simulation.initializer import create_graph_from_ham, initialize_NQS_model_f
 from compgraph.tensorflow_version.graph_tuple_manipulation import initialize_graph_tuples_tf_opt, precompute_graph_structure
 from compgraph.useful import copy_to_non_trainable
 import sonnet as snt
-import os
 # Import the specific functions we want to profile
-from debug_malloc_tf import log_training_metrics, log_weights_and_nan_check
+from tests.debug_malloc_tf import log_training_metrics, log_weights_and_nan_check
 tf.debugging.set_log_device_placement(True)
-# Set memory growth on GPUs if available
-gpus = tf.config.list_physical_devices('GPU')
-if gpus:
-    try:
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
-        print(f"GPU memory growth enabled on {len(gpus)} devices")
-    except RuntimeError as e:
-        print(f"GPU memory growth setting failed: {e}")
 
-# Function to track graph/tensor objects in TensorFlow
-# Function to inspect internal TensorFlow graphs
+
+def monitor_gpu():
+    import subprocess
+    result = subprocess.check_output("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits", shell=True)
+    return int(result.strip())
+
 def track_all_operations(n_iterations=10, batch_size=8):
     """
     Track memory usage across all three key operations:
@@ -53,15 +65,15 @@ def track_all_operations(n_iterations=10, batch_size=8):
     graph_type = "2dsquare"
     lattice_size = (4, 4)
     sublattice = "Neel"
-    beta = 0.01
-    
+    beta = 0.005
+    ansatz= "GNNprocnorm"
     # Create graph and model with minimal parameters
     graph, subl = create_graph_from_ham(graph_type, lattice_size, sublattice)
-    model_params = {"hidden_size": 128, "output_emb_size": 32}
+    model_params = {"hidden_size": 128, "output_emb_size": 64, "K_layer": 2}
     
     # Initialize two models
-    model_w = initialize_NQS_model_fromhyperparams("GNN2simple", model_params)
-    model_fix = initialize_NQS_model_fromhyperparams("GNN2simple", model_params)
+    model_w = initialize_NQS_model_fromhyperparams(ansatz, model_params, 860432)
+    model_fix = initialize_NQS_model_fromhyperparams(ansatz, model_params)
     
     # Create graph tuples and edge pairs
     GT_Batch = initialize_graph_tuples_tf_opt(batch_size, graph, subl)
@@ -72,12 +84,14 @@ def track_all_operations(n_iterations=10, batch_size=8):
     model_fix(GT_Batch)
     
     # Copy weights from model_w to model_fix
+
     copy_to_non_trainable(model_w, model_fix)
-    
+
+    template_graphs_output=initialize_graph_tuples_tf_opt(tf.shape(edge_pairs)[0]+1,graph,subl)   
     # Create samplers
-    sampler_var = MCMCSampler(model_w, GT_Batch, beta, edge_pairs=edge_pairs)
-    sampler_te = MCMCSampler(model_fix, GT_Batch, beta, edge_pairs=edge_pairs)
-    
+    sampler_var = MCMCSampler(GT_Batch, beta, edge_pairs=edge_pairs)
+    sampler_te = MCMCSampler(GT_Batch, template=template_graphs_output, beta=beta,edge_pairs=edge_pairs)
+
     # Initialize optimizer for gradient application
     optimizer = snt.optimizers.Adam(1e-4)  # Use a small learning rate
     
@@ -94,7 +108,7 @@ def track_all_operations(n_iterations=10, batch_size=8):
     # Add TensorBoard writer initialization
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     # log_dir = f"logs/full_tracking/memory_tracking/{timestamp}"
-    log_dir = f"logs/full_tracking/profiler/{timestamp}"
+    log_dir = f"logs/full_tracking/profiler/{ansatz}/{timestamp}"
 
     summary_writer = tf.summary.create_file_writer(log_dir)
     TRACE_EVERY = 10  # Capture full graph every 3 iterations
@@ -105,13 +119,11 @@ def track_all_operations(n_iterations=10, batch_size=8):
 
     for i in range(n_iterations):
         print(f"\n=== Iteration {i+1}/{n_iterations} ===")
-        aggressive_memory_cleanup()
+        # aggressive_memory_cleanup()
         # Only profile certain iterations to avoid excessive data
 
         # Pre-operations measurements
         pre_memory = process.memory_info().rss / (1024 * 1024)
-        pre_tf_objects = count_tf_objects()
-        pre_tf_functions = inspect_tf_functions()
                 # Enable graph tracing periodically
         trace_this_iteration = (i % TRACE_EVERY == 0)
         trace_this_iteration=False
@@ -130,12 +142,21 @@ def track_all_operations(n_iterations=10, batch_size=8):
             print("Step 0: Running monte_carlo_update_on_batch...")
             start_time = time.time()
             # Conditionally trace the MCMC component
-            if trace_this_iteration:
-                with summary_writer.as_default():
-                    tf.summary.trace_on(graph=True, profiler=False)
-                
-            GT_Batch, psi_new = sampler_var.monte_carlo_update_on_batch(GT_Batch, 4)
+            # if trace_this_iteration:
+            #     with summary_writer.as_default():
+            #         tf.summary.trace_on(graph=True, profiler=False)
             
+            for _ in range(16):
+                GT_Batch, psi_new = sampler_var.monte_carlo_update_on_batch(model_w, GT_Batch)
+                        # Aggiungi questo per tracciare l'utilizzo reale durante l'esecuzione
+
+                
+            # Inserisci punti di checkpoint
+            print(f"Prima di monte_carlo_update: {monitor_gpu()} MB")
+            for _ in range(16):
+                GT_Batch, psi_new = sampler_var.monte_carlo_update_on_batch(model_w, GT_Batch)
+            # esegui operazione
+            print(f"Dopo monte_carlo_update: {monitor_gpu()} MB")
             # Export MCMC component trace
             if trace_this_iteration:
                 with summary_writer.as_default():
@@ -150,7 +171,7 @@ def track_all_operations(n_iterations=10, batch_size=8):
             #         mcmc_time = time.time() - start_time
             # Post-MCMC measurements
             post_mcmc_memory = process.memory_info().rss / (1024 * 1024)
-            post_mcmc_tf_objects = count_tf_objects()
+            # post_mcmc_tf_objects = count_tf_objects()
             
             print(f"MCMC update complete - Time: {mcmc_time:.3f}s, Memory: {pre_memory:.1f} → {post_mcmc_memory:.1f} MB")
             
@@ -161,14 +182,15 @@ def track_all_operations(n_iterations=10, batch_size=8):
                 with summary_writer.as_default():
                     tf.summary.trace_on(graph=True, profiler=False)
             
-            phi_terms = compute_phi_terms(GT_Batch, sampler_te)
-            
-            # # Export phi_terms component trace
-            if trace_this_iteration:
-                with summary_writer.as_default():
-                    tf.summary.trace_export(
-                        name=f"phi_terms_graph",
-                        step=i)
+            phi_terms = compute_phi_terms(GT_Batch, sampler_te, model_fix)
+            print(f"Dopo phi terms: {monitor_gpu()} MB")
+
+            # # # Export phi_terms component trace
+            # if trace_this_iteration:
+            #     with summary_writer.as_default():
+            #         tf.summary.trace_export(
+            #             name=f"phi_terms_graph",
+            #             step=i)
             phi_terms_time = time.time() - start_time
             # with tf.name_scope("phi_terms_compute"):
             #     start_time = time.time()
@@ -177,14 +199,14 @@ def track_all_operations(n_iterations=10, batch_size=8):
             
             # Log phi_terms metrics
             post_phi_memory = process.memory_info().rss / (1024 * 1024)
-            post_phi_tf_objects = count_tf_objects()
+            # post_phi_tf_objects = count_tf_objects()
 
             with summary_writer.as_default():
                 tf.summary.scalar('phi_terms/time', phi_terms_time, step=i)
                 tf.summary.scalar('phi_terms/memory_diff', 
                                 post_phi_memory - post_mcmc_memory, step=i)
-                tf.summary.scalar('phi_terms/tf_objects', 
-                                post_phi_tf_objects - post_mcmc_tf_objects, step=i)    
+                # tf.summary.scalar('phi_terms/tf_objects', 
+                #                 post_phi_tf_objects - post_mcmc_tf_objects, step=i)    
             print(f"phi_terms complete - Time: {phi_terms_time:.3f}s, Memory: {post_mcmc_memory:.1f} → {post_phi_memory:.1f} MB")
             
             # Step 2: Compute stochastic energy
@@ -195,8 +217,10 @@ def track_all_operations(n_iterations=10, batch_size=8):
                 with summary_writer.as_default():
                     tf.summary.trace_on(graph=True, profiler=False)
             
-            energy, loc_energies = stochastic_energy_tf(psi_new, sampler_var, edge_pairs, GT_Batch, 0.0)
             
+            energy, std, loc_energies = stochastic_energy_tf(psi_new, model_w, edge_pairs,template_graphs_output, GT_Batch, 0.0)
+            print(f"Dopo stoch energy: {monitor_gpu()} MB")
+
             # # Export energy component trace
             if trace_this_iteration:
                 with summary_writer.as_default():
@@ -212,7 +236,7 @@ def track_all_operations(n_iterations=10, batch_size=8):
                     
             # Post-energy measurements
             post_energy_memory = process.memory_info().rss / (1024 * 1024)
-            post_energy_tf_objects = count_tf_objects()
+            # post_energy_tf_objects = count_tf_objects()
             # Energy-specific logging
             with summary_writer.as_default():
                 tf.summary.scalar('stochastic_energy/time', energy_time, step=i)
@@ -236,7 +260,7 @@ def track_all_operations(n_iterations=10, batch_size=8):
                 with summary_writer.as_default():
                     tf.summary.trace_on(graph=True, profiler=False)
             
-            stoch_loss, stoch_grads = stochastic_gradients_tfv3(phi_terms, GT_Batch, sampler_var)
+            stoch_loss, stoch_grads = stochastic_gradients_tfv3(phi_terms, GT_Batch, model_w)
             
             # # Export gradients component trace
             if trace_this_iteration:
@@ -248,13 +272,12 @@ def track_all_operations(n_iterations=10, batch_size=8):
             
             # Post-gradients measurements
             post_gradients_memory = process.memory_info().rss / (1024 * 1024)
-            post_gradients_tf_objects = count_tf_objects()
+            # post_gradients_tf_objects = count_tf_objects()
                 # Gradient-specific logging
             with summary_writer.as_default():
                 tf.summary.scalar('stochastic_gradients/time', gradients_time, step=i)
                 tf.summary.scalar('stochastic_gradients/loss', stoch_loss.numpy(), step=i)
                 tf.summary.scalar('stochastic_gradients/memory_diff', post_gradients_memory - post_energy_memory, step=i)
-                tf.summary.scalar('stochastic_gradients/tf_objects', post_gradients_tf_objects - post_energy_tf_objects, step=i)
                             
                 # log_gradient_norms(i, stoch_grads, summary_writer)
         
@@ -265,10 +288,9 @@ def track_all_operations(n_iterations=10, batch_size=8):
             # with tf.name_scope("optimizer_apply"):
             #     optimizer.apply(stoch_grads, sampler_var.model.trainable_variables) 
             start_time_opt = time.time()
-            optimizer.apply(stoch_grads, sampler_var.model.trainable_variables)            
+            optimizer.apply(stoch_grads, model_w.trainable_variables)            
             post_optimizer_time = time.time() - start_time_opt  
             post_optimizer_memory = process.memory_info().rss / (1024 * 1024)
-            post_optimizer_tf_objects = count_tf_objects()
             print(f"Optimizer applied - Memory: {post_gradients_memory:.1f} → {post_optimizer_memory:.1f} MB")
 
             # print(locals())
@@ -290,28 +312,26 @@ def track_all_operations(n_iterations=10, batch_size=8):
 
 
             post_deletion_memory = process.memory_info().rss / (1024 * 1024)
-            post_deletion_tf_objects = count_tf_objects()
             print(f"Deletion complete - Memory: {post_optimizer_memory:.1f} → {post_deletion_memory:.1f} MB")
             # After cleanup measurements
             # aggressive_memory_cleanup()
             # Log deletion impact
             with summary_writer.as_default():
                 tf.summary.scalar('deletion/memory_diff', post_deletion_memory - post_optimizer_memory, step=i)
-                tf.summary.scalar('deletion/tf_objects', post_deletion_tf_objects - post_optimizer_tf_objects, step=i)
                     
             post_cleanup_memory = process.memory_info().rss / (1024 * 1024)
-            post_cleanup_tf_objects = count_tf_objects()
+            # post_cleanup_tf_objects = count_tf_objects()
 
 
             print(f"Cleanup complete - Memory: {post_deletion_memory:.1f} → {post_cleanup_memory:.1f} MB")
 
-            post_cleanup_tf_functions = inspect_tf_functions()
+            # post_cleanup_tf_functions = inspect_tf_functions()
             
             # Log cleanup impact
             with summary_writer.as_default():
                 tf.summary.scalar('cleanup/memory_diff', post_cleanup_memory - post_deletion_memory, step=i)
-                tf.summary.scalar('cleanup/tf_objects', post_cleanup_tf_objects - post_deletion_tf_objects, step=i)
-                tf.summary.scalar('cleanup/tf_functions', post_cleanup_tf_functions, step=i)
+                # tf.summary.scalar('cleanup/tf_objects', post_cleanup_tf_objects - post_deletion_tf_objects, step=i)
+                # tf.summary.scalar('cleanup/tf_functions', post_cleanup_tf_functions, step=i)
             summary_writer.flush()
 
                 # Log graph-memory correlations
@@ -325,64 +345,61 @@ def track_all_operations(n_iterations=10, batch_size=8):
                 'iteration': i+1,
                 # Pre-operation memory state
                 'pre_memory': pre_memory,
-                'pre_tf_objects': pre_tf_objects,
-                'pre_tf_functions': pre_tf_functions,
                 
                 # Post-MCMC memory state
                 'post_mcmc_memory': post_mcmc_memory,
-                'post_mcmc_tf_objects': post_mcmc_tf_objects,
+                # 'post_mcmc_tf_objects': post_mcmc_tf_objects,
                 'mcmc_memory_diff': post_mcmc_memory - pre_memory,
                 'mcmc_time': mcmc_time,
                 
                 # Post-phi_terms memory state
                 'post_phi_memory': post_phi_memory,
-                'post_phi_tf_objects': post_phi_tf_objects,
+                # 'post_phi_tf_objects': post_phi_tf_objects,
                 'phi_memory_diff': post_phi_memory - post_mcmc_memory,
                 'phi_time': phi_terms_time,
                 
                 # Post-energy memory state
                 'post_energy_memory': post_energy_memory,
-                'post_energy_tf_objects': post_energy_tf_objects,
+                # 'post_energy_tf_objects': post_energy_tf_objects,
                 'energy_memory_diff': post_energy_memory - post_phi_memory,
                 'energy_time': energy_time,
                 
                 # Post-gradients memory state
                 'post_gradients_memory': post_gradients_memory,
-                'post_gradients_tf_objects': post_gradients_tf_objects,
+                # 'post_gradients_tf_objects': post_gradients_tf_objects,
                 'gradients_memory_diff': post_gradients_memory - post_energy_memory,
                 'gradients_time': gradients_time,
                 
 
                 #Post memory state after optimizer
                 'post_optimizer_memory': post_optimizer_memory,
-                'post_optimizer_tf_objects': post_optimizer_tf_objects,
+                # 'post_optimizer_tf_objects': post_optimizer_tf_objects,
                 'optimizer_memory_diff': post_optimizer_memory - post_gradients_memory,
                 'optimizer_time': post_optimizer_time,
                 #Post memory state after deletion   
                 'post_deletion_memory': post_deletion_memory,
-                'post_deletion_tf_objects': post_deletion_tf_objects,
+                # 'post_deletion_tf_objects': post_deletion_tf_objects,
                 'deletion_memory_diff': post_deletion_memory - post_optimizer_memory,
 
 
                 # Post-cleanup memory state
                 'post_cleanup_memory': post_cleanup_memory,
-                'post_cleanup_tf_objects': post_cleanup_tf_objects,
-                'post_cleanup_tf_functions': post_cleanup_tf_functions,
+                # 'post_cleanup_tf_objects': post_cleanup_tf_objects,
+                # 'post_cleanup_tf_functions': post_cleanup_tf_functions,
                 
 
                 # Total impact
                 'total_memory_increase': post_gradients_memory - pre_memory,
                 'memory_retained_after_cleanup': post_cleanup_memory - pre_memory,
-                'tf_objects_retained': post_cleanup_tf_objects - pre_tf_objects,
-                'tf_functions_retained': post_cleanup_tf_functions - pre_tf_functions
+                # 'tf_objects_retained': post_cleanup_tf_objects,
+                # 'tf_functions_retained': post_cleanup_tf_functions
             })
             
             # Print summary for this iteration
             print(f"\n=== Iteration {i+1} Summary ===")
             print(f"Total memory impact: {metrics[-1]['total_memory_increase']:.2f} MB")
             print(f"Memory retained after cleanup: {metrics[-1]['memory_retained_after_cleanup']:.2f} MB")
-            print(f"TF objects retained: {metrics[-1]['tf_objects_retained']}")
-            print(f"TF functions retained: {metrics[-1]['tf_functions_retained']}")
+
 
         finally:
             # Stop profiler if active
@@ -595,8 +612,8 @@ def run_accumulation_test(n_iterations=3, inner_iterations=5, batch_size=32):
     copy_to_non_trainable(model_w, model_fix)
     
     # Create samplers
-    sampler_var = MCMCSampler(model_w, GT_Batch, beta, edge_pairs=edge_pairs)
-    sampler_te = MCMCSampler(model_fix, GT_Batch, beta, edge_pairs=edge_pairs)
+    sampler_var = MCMCSampler(GT_Batch, beta, edge_pairs=edge_pairs)
+    sampler_te = MCMCSampler(GT_Batch, beta, edge_pairs=edge_pairs)
     
     # Initialize optimizer
     optimizer = snt.optimizers.Adam(1e-4)
@@ -617,7 +634,7 @@ def run_accumulation_test(n_iterations=3, inner_iterations=5, batch_size=32):
         # Pre-round measurements
         pre_round_memory = process.memory_info().rss / (1024 * 1024)
         pre_round_tf_objects = count_tf_objects()
-        pre_round_tf_functions = inspect_tf_functions()
+        # pre_round_tf_functions = inspect_tf_functions()
         
         round_metrics = {
             'round': round_idx+1,
@@ -627,7 +644,7 @@ def run_accumulation_test(n_iterations=3, inner_iterations=5, batch_size=32):
             'iterations': []
         }
         gc.collect()
-        copy_to_non_trainable(sampler_var.model, sampler_te.model)
+        copy_to_non_trainable(model_var, model_te)
 
         # Run inner iterations without aggressive cleanup between them
         for inner_idx in range(inner_iterations):
@@ -664,7 +681,7 @@ def run_accumulation_test(n_iterations=3, inner_iterations=5, batch_size=32):
             gradients_time = time.time() - start_time
             
             # Apply gradients
-            optimizer.apply(stoch_grads, sampler_var.model.trainable_variables)
+            optimizer.apply(stoch_grads, model_w.trainable_variables)
             
             # Post-iteration measurements
             post_iter_memory = process.memory_info().rss / (1024 * 1024)
@@ -698,7 +715,7 @@ def run_accumulation_test(n_iterations=3, inner_iterations=5, batch_size=32):
         # Post-round measurements
         post_round_memory = process.memory_info().rss / (1024 * 1024)
         post_round_tf_objects = count_tf_objects()
-        post_round_tf_functions = inspect_tf_functions()
+        # post_round_tf_functions = inspect_tf_functions()
         
         # Update round metrics
         round_metrics.update({
@@ -707,7 +724,7 @@ def run_accumulation_test(n_iterations=3, inner_iterations=5, batch_size=32):
             'post_tf_objects': post_round_tf_objects,
             'tf_objects_growth': post_round_tf_objects - pre_round_tf_objects,
             'post_tf_functions': post_round_tf_functions,
-            'tf_functions_growth': post_round_tf_functions - pre_round_tf_functions
+            # 'tf_functions_growth': post_round_tf_functions - pre_round_tf_functions
         })
         
         # Add to overall metrics
@@ -880,7 +897,7 @@ def track_all_operations_without_tf_counting(n_iterations=10, batch_size=8):
             post_gradients_memory = process.memory_info().rss / (1024 * 1024)
             
             start_time_opt = time.time()
-            optimizer.apply(stoch_grads, sampler_var.model.trainable_variables)            
+            optimizer.apply(stoch_grads, model_w.trainable_variables)            
             post_optimizer_time = time.time() - start_time_opt  
             post_optimizer_memory = process.memory_info().rss / (1024 * 1024)
             
@@ -929,6 +946,8 @@ def track_all_operations_without_tf_counting(n_iterations=10, batch_size=8):
     return metrics
 
 if __name__ == "__main__":
+    # tf.config.run_functions_eagerly(True)
+
     print("TensorFlow Memory Analysis Tool")
     print("------------------------------")
     print("1. Comprehensive operation tracking")

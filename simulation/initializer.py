@@ -1,5 +1,5 @@
 import sonnet as snt
-from compgraph.models import GNN_double_output_single, GNN_double_output_advanced, GNN_double_output
+from compgraph.models import GNN_double_output_single, GNN_double_output_advanced, GNN_double_output, GNN_double_output_advanced_proc_norm
 from compgraph.useful import create_2d_square_graph, create_graph_tuples
 import time
 import numpy as np
@@ -9,7 +9,7 @@ from compgraph.tensor_wave_functions import variational_wave_function_on_batch, 
 from compgraph.tensor_wave_functions import montecarlo_logloss_overlap_time_evoluted, sparse_tensor_exp_energy, calculate_sparse_overlap, quimb_vec_to_sparse
 import sonnet as snt
 from compgraph.useful import copy_to_non_trainable  # Importing custom functions and model class
-
+import networkx as nx
 def format_hyperparams_to_string(hyperparams):
     """
     Concatenate the contents of the hyperparameters dictionary into a single string.
@@ -62,6 +62,12 @@ def initialize_NQS_model_fromhyperparams(ansatz:str, ansatz_params:dict, seed=No
             tf.constant(params['K_layer']),
             seed=seed
         ),
+        'GNNprocnorm': lambda params, seed: GNN_double_output_advanced_proc_norm(
+            tf.constant(params['hidden_size']), 
+            tf.constant(params['output_emb_size']), 
+            tf.constant(params['K_layer']),
+            seed=seed
+        ),
     }
 
     if ansatz in model_mapping:
@@ -71,12 +77,30 @@ def initialize_NQS_model_fromhyperparams(ansatz:str, ansatz_params:dict, seed=No
         raise ValueError(f"This model cannot be initialized. Available models: {available_models}")
 
 
-def neel_state(graph):
+def alternate_state(graph):
     num_sites=len(graph.nodes)
     sublattice_encoding = np.zeros((num_sites, 2))  # Two sublattices
     sublattice_encoding[::2, 0] = 1  # Sublattice 1
     sublattice_encoding[1::2, 1] = 1  # Sublattice 2 
     return sublattice_encoding
+def neel_encoding_from_graph(G):
+    """
+    Given a bipartite NetworkX graph G with N nodes, return:
+      • enc:   (N,2) one-hot array where enc[i,0]=1 if node i in sublattice A,
+               enc[i,1]=1 if in sublattice B.
+    """
+    # 1) Two-color the graph (raises if G is not bipartite)
+    coloring = nx.algorithms.bipartite.color(G)
+    # 2) Fix a consistent ordering of nodes
+    node_list = list(G.nodes())        
+    N = len(node_list)
+
+    enc = np.zeros((N, 2), dtype=np.float32)
+    for idx, node in enumerate(node_list):
+        c = coloring[node]           # 0 or 1
+        enc[idx, c] = 1.0
+
+    return np.array(enc)
 
 def disordered_state(graph):
     """
@@ -105,8 +129,10 @@ def apply_sublattice_encoding(graph, sublattice_type):
     """
     # Mapping of sublattice type strings to their corresponding functions
     sublattice_mapping = {
-        'Neel': neel_state,
-        'Disordered': disordered_state
+        'Neel': neel_encoding_from_graph,
+        'Disordered': disordered_state,
+        'Alternatepattern':alternate_state
+
     }
 
     if sublattice_type in sublattice_mapping:

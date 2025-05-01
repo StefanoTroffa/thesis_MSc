@@ -8,9 +8,8 @@ from graph_nets import blocks
 def get_initializer(seed=None):
     """Create a GlorotUniform initializer with an optional seed."""
     return tf.keras.initializers.GlorotUniform(seed=seed)
-
 # Constant initializer stays the same
-bias_initializer = tf.keras.initializers.Constant(0.01)  # Small positive value for biases
+# bias_initializer = tf.keras.initializers.Constant(0.01)  # Small positive value for biases
 
 # Define the global model with seeded initialization
 class MLPModel_glob(snt.Module):
@@ -111,6 +110,76 @@ class ProcessorLayer(snt.Module):
             edges=inputs.edges + updated_graph.edges,
             globals=inputs.globals + updated_graph.globals)
 
+## Normalized version of the ProcessorLayer
+class ScaledResidual(snt.Module):
+    def __init__(self, init_scale=1.0 / np.sqrt(2), name=None):
+        super().__init__(name=name)
+        self.alpha = tf.Variable(init_scale, trainable=True, dtype=tf.float32)
+
+    def __call__(self, x, update):
+        return x + self.alpha * update
+class ProcessorLayer_norm(snt.Module):
+    def __init__(self, hidden_layer_size, output_emb_size, seed=None, name=None):
+        super(ProcessorLayer_norm, self).__init__(name=name)
+        # Use different seeds for different components
+        edge_seed = None if seed is None else seed * 10 + 1
+        node_seed = None if seed is None else seed * 10 + 2
+        global_seed = None if seed is None else seed * 10 + 3
+        
+        self.edge_model = MLPModel_4layers(hidden_layer_size, output_emb_size, seed=edge_seed)
+        self.node_model = MLPModel_4layers(hidden_layer_size, output_emb_size, seed=node_seed)
+        self.global_model = MLPModel_globv2(seed=global_seed)
+        self.gn = modules.GraphNetwork(
+            edge_model_fn=lambda: self.edge_model,
+            node_model_fn=lambda: self.node_model,
+            global_model_fn=lambda: self.global_model
+        )
+        self.skip = ScaledResidual()
+        self.norm_nodes   = snt.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+        self.norm_edges   = snt.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+        self.norm_globals = snt.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+
+    def __call__(self, graphs):
+        updated = self.gn(graphs)
+        new_nodes   = self.skip(graphs.nodes,   updated.nodes)
+        new_edges   = self.skip(graphs.edges,   updated.edges)
+        new_globals = self.skip(graphs.globals, updated.globals)
+        return graphs.replace(
+            nodes   = self.norm_nodes(new_nodes),
+            edges   = self.norm_edges(new_edges),
+            globals = self.norm_globals(new_globals)
+        )
+    
+# Stack of ProcessorLayerNorms
+class ProcessorStackNorm(snt.Module):
+    def __init__(self, hidden_size, output_size, num_layers, seed=None, name=None):
+        super().__init__(name=name)
+        self.layers = []
+        for i in range(num_layers):
+            layer_seed = None if seed is None else seed * 100 + i
+            layer = ProcessorLayer_norm(hidden_size, output_size, seed=layer_seed)
+            self.layers.append(layer)
+
+    def __call__(self, graphs):
+        for layer in self.layers:
+            graphs = layer(graphs)
+        return graphs
+    
+class ProcessorStack(snt.Module):
+    def __init__(self, hidden_layer_size, output_emb_size, num_layers, seed=None):
+        super().__init__()
+        self.processors = []
+        # Use different seeds for different processor layers
+        for i in range(num_layers):
+            layer_seed = None if seed is None else seed * 100 + i
+            processor = ProcessorLayer(hidden_layer_size, output_emb_size, seed=layer_seed)
+            self.processors.append(processor)
+    
+    def __call__(self, graph):
+        for processor in self.processors:
+            graph = processor(graph)
+        return graph
+
 # Define the Decoder with seeded initialization
 class Decoder(snt.Module):
     def __init__(self, hidden_layer_size, output_emb_size, seed=None, name=None):
@@ -130,7 +199,7 @@ class Decoder(snt.Module):
             node_model_fn=lambda: self.node_model,
             global_model_fn=lambda: self.global_model
         )(inputs)
-
+    
 # Define the Pooling layer with seeded initialization
 class PoolingLayer_double(snt.Module):
     def __init__(self, seed=None):
@@ -153,20 +222,6 @@ class PoolingLayer_double(snt.Module):
         out = tf.nn.elu(transformed + transformed_globals)
         return out
 
-class ProcessorStack(snt.Module):
-    def __init__(self, hidden_layer_size, output_emb_size, num_layers, seed=None):
-        super().__init__()
-        self.processors = []
-        # Use different seeds for different processor layers
-        for i in range(num_layers):
-            layer_seed = None if seed is None else seed * 100 + i
-            processor = ProcessorLayer(hidden_layer_size, output_emb_size, seed=layer_seed)
-            self.processors.append(processor)
-    
-    def __call__(self, graph):
-        for processor in self.processors:
-            graph = processor(graph)
-        return graph
 
 class PoolingLayer_double_batch(snt.Module):
     def __init__(self, seed=None):
@@ -205,7 +260,56 @@ class PoolingLayer_double_batch(snt.Module):
         # Final activation
         out = tf.nn.elu(transformed + transformed_globals)
         return out
-       
+class TwoHeadPoolingBatch(snt.Module):
+    """Batch-wise pool a GraphsTuple → [amplitude, phase] per graph."""
+    def __init__(self, hidden_size: int, seed=None, name=None):
+        super().__init__(name=name)
+        # seeds for reproducibility
+        proj_seed  = None if seed is None else seed*10 + 1
+        amp_seed   = None if seed is None else seed*10 + 2
+        phase_seed = None if seed is None else seed*10 + 3
+
+        # optional hidden projection before the two heads
+        self.proj = snt.Linear(output_size=hidden_size,
+                               w_init=get_initializer(proj_seed),
+                               name="pool_proj")
+
+        # head that predicts the *amplitude* ψ₀(s)
+        self.amp_head = snt.Linear(output_size=1,
+                                   w_init=get_initializer(amp_seed),
+                                   name="amp_head")
+
+        # head that predicts the *phase* φ(s)
+        self.phase_head = snt.Linear(output_size=1,
+                                     w_init=get_initializer(phase_seed),
+                                     name="phase_head")
+
+    def __call__(self, graphs):
+        # 1) segment‐sum pool nodes & edges per graph
+        batch_size = tf.shape(graphs.n_node)[0]
+
+        node_segs = tf.repeat(tf.range(batch_size), graphs.n_node)
+        edge_segs = tf.repeat(tf.range(batch_size), graphs.n_edge)
+
+        pooled_nodes = tf.math.unsorted_segment_sum(
+            graphs.nodes, node_segs, batch_size
+        )
+        pooled_edges = tf.math.unsorted_segment_sum(
+            graphs.edges, edge_segs, batch_size
+        )
+
+        # 2) concat with globals: shape [batch, node_feat+edge_feat+global_feat]
+        x = tf.concat([pooled_nodes, pooled_edges, graphs.globals], axis=-1)
+
+        # 3) optional hidden layer
+        h = tf.nn.relu(self.proj(x))
+
+        # 4) two independent linear heads (no ELU/ReLU here!)
+        amp   = self.amp_head(h)    # ψ₀(s)   — the amplitude
+        phase = self.phase_head(h)  # φ(s)    — the angle
+
+        # return shape [batch, 2]
+        return tf.concat([amp, phase], axis=-1)       
 class GNN_double_output_single(snt.Module):
     def __init__(self, hidden_layer_size=tf.constant(128), output_emb_size=tf.constant(64), seed=None):
         super(GNN_double_output_single, self).__init__()
@@ -258,6 +362,31 @@ class GNN_double_output_advanced(snt.Module):
         self.decoder = Decoder(hidden_layer_size, output_emb_size, seed=decoder_seed)
         self.pooling_layer = PoolingLayer_double_batch(seed=pooling_seed)
     
+    @tf.function(jit_compile=True)
+    def __call__(self, inputs):
+        encoded = self.encoder(inputs)
+        proc = self.processor(encoded)
+        decoded = self.decoder(proc)
+        output = self.pooling_layer(decoded)
+        return output
+
+# Define a comprehensive GNN model with seeded initialization
+class GNN_double_output_advanced_proc_norm(snt.Module):
+    def __init__(self, hidden_layer_size=tf.constant(128), output_emb_size=tf.constant(64), 
+                num_layers=tf.constant(1), seed=None):
+        super().__init__()
+        # Use different seeds for different components
+        encoder_seed = None if seed is None else seed * 10 + 1
+        processor_seed = None if seed is None else seed * 10 + 2
+        decoder_seed = None if seed is None else seed * 10 + 3
+        pooling_seed = None if seed is None else seed * 10 + 4
+        
+        self.encoder = Encoder(hidden_layer_size, output_emb_size, seed=encoder_seed)
+        self.processor = ProcessorStackNorm(hidden_layer_size, output_emb_size, num_layers, seed=processor_seed)
+        self.decoder = Decoder(hidden_layer_size, output_emb_size, seed=decoder_seed)
+        self.pooling_layer = PoolingLayer_double_batch(seed=pooling_seed)
+    
+    # @tf.function(jit_compile=True)
     @tf.function(jit_compile=True)
     def __call__(self, inputs):
         encoded = self.encoder(inputs)
