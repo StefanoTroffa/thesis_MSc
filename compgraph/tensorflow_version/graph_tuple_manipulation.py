@@ -93,20 +93,13 @@ def precompute_graph_structure(graph: nx.Graph) -> Tuple[tf.Tensor, tf.Tensor, t
 # @tf.function(jit_compile=True)
 def update_graph_tuples_config_jit(graph_tuple: GraphsTuple, 
                                 configurations: tf.Tensor) -> GraphsTuple:
-    """Update node configurations while preserving structure (JIT-safe)."""
-    # Ensure static shape and dtype
-    # configurations = tf.ensure_shape(configurations, [5,4])
+    """Update node configurations while preserving structure"""
     configurations = tf.cast(configurations, graph_tuple.nodes.dtype)
-    # num_nodes_total = graph_tuple.nodes.shape[0]
-
-    # tf.print("configs shape:", tf.shape(configurations))
-    # tf.print("template nodes shape:", tf.shape(graph_tuple.nodes))
     print(graph_tuple.nodes[:, 1:])
     # Construct new nodes with original sublattice encoding
     # tf.debugging.assert_equal(
     # tf.shape(configurations)[0]*tf.shape(configurations)[1],
     # tf.shape(graph_tuple.nodes)[0],
-    # message="Mismatch in number of nodes vs configurations")
     batch_size, num_nodes = configurations.shape
 
     tf.ensure_shape(configurations, [batch_size, num_nodes])
@@ -127,7 +120,8 @@ def update_graph_tuples_config_jit(graph_tuple: GraphsTuple,
         receivers=graph_tuple.receivers,
         n_node=graph_tuple.n_node,
         n_edge=graph_tuple.n_edge
-    ) 
+    )
+ 
 @tf.function(jit_compile=True)
 def update_graph_tuple_config_jit(graph_tuple: GraphsTuple, 
                                 config: tf.Tensor) -> GraphsTuple:

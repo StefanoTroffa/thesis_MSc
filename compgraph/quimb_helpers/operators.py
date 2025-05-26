@@ -1,5 +1,6 @@
-import numpy as np
-import quimb as qu
+
+import numpy as np, quimb as qu
+
 def spin_at_square_site(i, j, n, m, component='z'):
     """
     Creates a spin operator for the specified component at site (i,j) in an n×m square lattice
@@ -18,14 +19,11 @@ def spin_at_square_site(i, j, n, m, component='z'):
     operator
         The spin operator at the specified site
     """
-    # Define dimensions for the n×m grid
     dims = [[2] * m] * n  # n×m grid of spin-1/2 particles
     
-    # Create the spin operator
     S = qu.spin_operator(component, sparse=True)
     
-    # Place it at the specified site
-    site = (i, j)  # Site coordinates in 2D grid
+    site = (i, j)  
     return qu.ikron(S, dims, inds=[site])
 def calculate_site_magnetizations_square(state, n, m):
     """
@@ -130,8 +128,6 @@ def spin_structure_factor(psi, n, m, kxs=None, kys=None):
 
 
 
-## Exact Quimb
-import numpy as np, quimb as qu
 def staggered_magnetization_quimb(n,m, gs_quimb):
     """
     Compute the staggered magnetization for a 2D Heisenberg model using Quimb.
@@ -151,3 +147,4 @@ def staggered_magnetization_quimb(n,m, gs_quimb):
     Spp_quimb   = Ms2 / (N_sites)
     print("Quimb baseline:", m_rms_quimb, m_abs_quimb, Spp_quimb)
     return m_rms_quimb, m_abs_quimb, Spp_quimb
+

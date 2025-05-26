@@ -53,3 +53,6 @@ tests/**/*DESK*
 .env
 tensorboard_logs/
 xla_debug_dumps/
+saving*
+checkpointed*
+_old_data/*
