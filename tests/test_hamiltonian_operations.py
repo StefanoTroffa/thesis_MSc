@@ -8,14 +8,14 @@ from compgraph.cg_repr import graph_tuple_to_config_hamiltonian_product_update
 from compgraph.tensor_wave_functions import sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes
 import tensorflow as tf
 from compgraph.tensorflow_version.hamiltonian_operations import config_hamiltonian_product_jit_o3, config_hamiltonian_product_xla_improved
-from simulation.initializer import neel_state
+from simulation.initializer import neel_encoding_from_graph
 from compgraph.useful import create_graph_tuples, node_to_index, state_from_config_amplitudes, config_to_state
 from compgraph.models import GNN_double_output
 from compgraph.tensor_wave_functions import variational_wave_function_on_batch, sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes, time_evoluted_wave_function_on_batch, montecarlo_logloss_overlap_time_evoluted, calculate_sparse_overlap, quimb_vec_to_sparse
 from compgraph.tensor_wave_functions import variational_wave_function_on_batch, sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes, time_evoluted_wave_function_on_batch, montecarlo_logloss_overlap_time_evoluted, calculate_sparse_overlap, quimb_vec_to_sparse
-from simulation.initializer import create_graph_from_ham, neel_state
+from simulation.initializer import create_graph_from_ham, neel_encoding_from_graph
 from compgraph.tensorflow_version.graph_tuple_manipulation import initialize_graph_tuples_tf_opt, precompute_graph_structure
-from compgraph.tensorflow_version.hamiltonian_operations import stochastic_gradients_tfv3, stochastic_energy_tf, stochastic_loss_tf
+from compgraph.tensorflow_version.hamiltonian_operations import stochastic_gradients_tfv3, stochastic_energy_tf
 
 import itertools
 from compgraph.monte_carlo import MCMCSampler,compute_phi_terms, stochastic_energy
@@ -32,6 +32,7 @@ from simulation.initializer import (
     create_graph_from_ham,
     initialize_NQS_model_fromhyperparams,
     initialize_graph_tuples,
+    neel_encoding_from_graph
 )
 
 

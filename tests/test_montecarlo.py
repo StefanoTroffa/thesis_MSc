@@ -4,11 +4,12 @@ import quimb as qu
 import networkx as nx
 import tensorflow as tf
 from compgraph.cg_repr import *
-from compgraph.useful import create_graph_tuples, node_to_index, neel_state, state_from_config_amplitudes, config_to_state
+
+from compgraph.useful import create_graph_tuples, node_to_index, state_from_config_amplitudes, config_to_state
 from compgraph.models import GNN_double_output
 from compgraph.tensor_wave_functions import variational_wave_function_on_batch, sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes, time_evoluted_wave_function_on_batch, montecarlo_logloss_overlap_time_evoluted, calculate_sparse_overlap, quimb_vec_to_sparse
 from compgraph.tensor_wave_functions import variational_wave_function_on_batch, sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes, time_evoluted_wave_function_on_batch, montecarlo_logloss_overlap_time_evoluted, calculate_sparse_overlap, quimb_vec_to_sparse
-from simulation.initializer import create_graph_from_ham
+from simulation.initializer import create_graph_from_ham, neel_encoding_from_graph
 import itertools
 from compgraph.monte_carlo import MCMCSampler
 from compgraph.models import GNN_double_output
@@ -47,7 +48,7 @@ class TestMonteCarlofunctions(unittest.TestCase):
         G = nx.grid_2d_graph(*lattice_size, periodic=True)
         mapping = {node: idx for idx, node in enumerate(G.nodes())}
         G = nx.relabel_nodes(G, mapping)
-        sublattice_enc = neel_state(G)
+        sublattice_enc = neel_encoding_from_graph(G)
         graph_hamiltonian = qu.ham_heis_2D(n, m, j=1.0, bz=0, cyclic=True, sparse=True)
 
         # Simulate multiple tests
@@ -102,7 +103,7 @@ class TestMonteCarlofunctions(unittest.TestCase):
         G = nx.grid_2d_graph(*lattice_size, periodic=True)
         mapping = {node: idx for idx, node in enumerate(G.nodes())}
         G = nx.relabel_nodes(G, mapping)
-        sublattice_enc = neel_state(G)
+        sublattice_enc = neel_encoding_from_graph(G)
         graph_hamiltonian = qu.ham_heis_2D(n, m, j=1.0, bz=0, cyclic=True, sparse=True)
         beta = 0.05
         model_var = GNN_double_output(32, 16)

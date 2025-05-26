@@ -12,12 +12,6 @@ from compgraph.tensorflow_version.graph_tuple_manipulation import get_single_gra
 from typing import Tuple
 from graph_nets.graphs import GraphsTuple
 
-
-# import line_profiler
-# import atexit
-# profile = line_profiler.LineProfiler()
-# atexit.register(profile.print_stats)
-#Todo make the 
 from memory_profiler import profile as mprofile
 
 def propose_graph_tuple(graph_tuple):

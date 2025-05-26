@@ -3,11 +3,12 @@ import numpy as np
 from compgraph.cg_repr import *
 import quimb as qu
 import networkx as nx
-from compgraph.useful import config_to_state, node_to_index, graph_tuple_list_to_configs_list, config_list_to_state_list, neel_state, state_from_config_amplitudes
+from compgraph.useful import config_to_state, node_to_index, graph_tuple_list_to_configs_list, config_list_to_state_list,  state_from_config_amplitudes
 from compgraph.cg_repr import graph_tuple_to_config_hamiltonian_product_update
 from compgraph.tensor_wave_functions import sparse_tensor_exp_energy, create_sparsetensor_from_configs_amplitudes
 import itertools
 import tensorflow as tf
+from simulation.initializer import neel_encoding_from_graph
 class TestCgRepr(unittest.TestCase):
     def setUp(self) -> None:
         self.config= np.array([-1, -1, 1])
@@ -138,7 +139,7 @@ class TestCgRepr(unittest.TestCase):
         G = nx.grid_2d_graph(*lattice_size, periodic=True)
         mapping = node_to_index(G)
         G = nx.relabel_nodes(G, mapping)
-        sub_lattice_encoding=neel_state(G) 
+        sub_lattice_encoding=neel_encoding_from_graph(G) 
         full_basis_configs = np.array([[int(x) for x in format(i, f'0{n*m}b')] for i in range(2**(n*m))]) * 2 - 1
 
         for configuration in full_basis_configs:

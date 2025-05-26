@@ -1,4 +1,3 @@
-name: /home/s3378209/data1/envs/gnets2
 channels:
   - conda-forge
   - defaults
